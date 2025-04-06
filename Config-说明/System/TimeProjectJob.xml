@@ -1,0 +1,20 @@
+<TimeProject>
+  <TimeProjectJob>
+    <NameCN>任务1</NameCN><!--job 中文名称-->
+    <NameEN>Jobone</NameEN><!--job 英文名称 必填 创建文件夹只用这个名称 避免用特殊字符 可能会造成创建文件夹不成功-->
+    <Status>True</Status><!--是否执行   执行:True  停止执行：False-->
+    <Type>0</Type><!--执行状态  0：调用API  1: 顺序执行（必须有FUN_Sequence.xml 配合才能使用）  2：执行存储过程（暂时还没有）-->
+  </TimeProjectJob>
+  <TimeProjectJob>
+    <NameCN>任务2</NameCN>
+    <NameEN>Jobtwo</NameEN>
+    <Status>false</Status>
+    <Type>0</Type>
+  </TimeProjectJob>
+  <TimeProjectJob>
+    <NameCN>任务3</NameCN>
+    <NameEN>Jobthree</NameEN>
+    <Status>false</Status>
+    <Type>0</Type>
+  </TimeProjectJob>
+</TimeProject>
