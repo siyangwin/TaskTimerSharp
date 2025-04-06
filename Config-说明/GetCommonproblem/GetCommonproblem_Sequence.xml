@@ -1,0 +1,14 @@
+<TimeProject>
+  <TimeProjectJob>
+    <Project>API地址</Project>
+    <Info>https://xxxx.com/api/datasync/shop</Info>
+  </TimeProjectJob>
+  <TimeProjectJob>
+    <Project>API地址</Project>
+    <Info>https://xxxx.com/api/datasync/synccategoriesandimg</Info>
+  </TimeProjectJob>
+  <TimeProjectJob>
+    <Project>存储过程</Project>
+    <Info>BackChangeProductTimeByItemMaster</Info>
+  </TimeProjectJob>
+</TimeProject>

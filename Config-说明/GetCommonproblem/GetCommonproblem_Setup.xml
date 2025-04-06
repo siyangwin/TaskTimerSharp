@@ -1,0 +1,18 @@
+<TimeProject>
+  <TimeProjectJob>
+    <StartTime>2020-01-14 16:47</StartTime> <!-- 可选，任务开始时间 -->
+    <EndTime>2020-01-14 16:48</EndTime>     <!-- 可选，任务结束时间 -->
+    <ExecutionStatus>0</ExecutionStatus>    <!-- 执行模式：0 为按间隔，1 为按周期 -->
+    <IntervalsTime>30</IntervalsTime>       <!-- 执行间隔时间，单位：秒 -->
+    <CycltType>EveryWeek</CycltType>        <!-- 周期类型，可选：EveryDay / EveryWeek -->
+    <DayOfWeek>Monday</DayOfWeek>           <!-- 每周任务执行的具体星期几 -->
+    <SpecificTime>05:00</SpecificTime>      <!-- 执行时间点（24小时制） -->
+    <ApiUrl>Url</ApiUrl>                    <!-- 请求接口地址Get -->
+    <Remark>获取任务1</Remark>               <!-- 描述任务用途 -->
+    <MailTo>xxxx@gmail.com</MailTo>         <!-- 执行成功后通知的收件人 -->
+    <SendMail>True</SendMail>               <!-- 是否发送通知邮件 -->
+    <ConnStr></ConnStr>                     <!-- 可选数据库连接字符串 -->
+    <Verification>False</Verification>      <!-- 是否启用 API 密钥验证 -->
+    <AuthenticationKey></AuthenticationKey><!-- 安全验证密钥 -->
+  </TimeProjectJob>
+</TimeProject>
