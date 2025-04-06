@@ -124,7 +124,6 @@ cd C:\Windows\Microsoft.NET\Framework64\v4.0.30319\
 安装 运行 你的服务 EXE的路径
 installutil.exe E:\test\TimerProjectByWindowsService.exe
 
-
 卸载 运行 你的服务 EXE的路径
 installutil.exe /u E:\test\TimerProjectByWindowsService.exe
 
@@ -141,16 +140,16 @@ sc config TimeProject start= auto
 sc config TimeProject start= demand
 
 打开服务窗体
-
 CMD >  services.msc
 
-
-启动服务：net start 服务名
-停止服务：net stop 服务名暂停服务：net pause 服务名
-恢复被暂停的服务：net continue 服务名
-禁用服务：sc config 服务名 start=disabled
-将服务设为自动启动：sc config 服务名 start= auto
-将服务设为手动启动：sc config 服务名 start= demand
+##### 基本语法：
+启动服务：net start 服务名  
+停止服务：net stop 服务名  
+暂停服务：net pause 服务名  
+恢复被暂停的服务：net continue 服务名  
+禁用服务：sc config 服务名 start=disabled  
+将服务设为自动启动：sc config 服务名 start= auto  
+将服务设为手动启动：sc config 服务名 start= demand  
 
 
 
