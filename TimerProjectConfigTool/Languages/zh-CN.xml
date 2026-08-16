@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Language name="简体中文" code="zh-CN">
+  <!-- 通用 -->
+  <String key="common.ok">确定</String>
+  <String key="common.cancel">取消</String>
+  <String key="common.save">保存</String>
+  <String key="common.refresh">刷新</String>
+  <String key="common.error">错误</String>
+  <String key="common.success">成功</String>
+  <String key="common.warning">警告</String>
+  <String key="common.confirm">确认</String>
+  <String key="common.exists">存在</String>
+  <String key="common.missing">缺失</String>
+  <String key="common.enabled">启用</String>
+  <String key="common.disabled">停用</String>
+  <String key="common.notInstalled">未安装</String>
+  <String key="common.testing">测试中…</String>
+
+  <!-- 主窗体 -->
+  <String key="main.title">任务定时程序配置工具</String>
+  <String key="main.rootDir">根目录：</String>
+  <String key="main.btnBrowse">浏览…</String>
+  <String key="main.langLabel">语言：</String>
+  <String key="main.serviceStatus">服务状态：</String>
+  <String key="main.btnRefreshStatus">刷新状态</String>
+  <String key="main.btnRestartService">重启服务</String>
+  <String key="main.tabJobs">任务管理</String>
+  <String key="main.tabLogs">日志浏览</String>
+  <String key="main.tabMail">邮件设置</String>
+  <String key="main.colNameCN">中文名</String>
+  <String key="main.colNameEN">英文名</String>
+  <String key="main.colType">类型</String>
+  <String key="main.colStatus">状态</String>
+  <String key="main.colFolder">文件夹</String>
+  <String key="main.colSetup">Setup文件</String>
+  <String key="main.colSequence">Sequence文件</String>
+  <String key="main.colIssue">备注</String>
+  <String key="main.typeApi">调用API</String>
+  <String key="main.typeSequence">顺序执行</String>
+  <String key="main.typeSp">存储过程</String>
+  <String key="main.btnNewJob">新建任务</String>
+  <String key="main.btnEdit">编辑</String>
+  <String key="main.btnEnable">启用</String>
+  <String key="main.btnDisable">停用</String>
+  <String key="main.btnOpenFolder">打开任务文件夹</String>
+  <String key="main.savedNoRestart">已保存，服务每秒自动加载配置，无需重启</String>
+  <String key="main.issueNotRegistered">有任务文件夹，未注册</String>
+  <String key="main.issueNoFolder">已注册，缺任务文件夹</String>
+  <String key="main.issueNotRegisteredTip">Config 下存在该任务的文件夹，但 System.xml 中没有它的注册记录，服务不会执行它。打开编辑并保存一次即可自动注册。</String>
+  <String key="main.issueNoFolderTip">System.xml 中注册了该任务，但 Config 下找不到它的文件夹（缺少 Setup.xml），服务无法执行。打开编辑并保存一次即可自动补建文件夹与配置。</String>
+  <String key="main.detectSummaryWithConfig">已加载：Config 下有 {0} 个任务，检测到服务配置文件</String>
+  <String key="main.detectSummaryNoConfig">已加载：Config 下有 {0} 个任务，未检测到 exe.config（邮件设置页不可用）</String>
+  <String key="main.selectJobFirst">请先选择一个任务</String>
+  <String key="main.openFolderFailed">无法打开文件夹：{0}</String>
+  <String key="main.loadConfigFailed">读取配置失败：{0}</String>
+  <String key="main.saveFailed">保存失败：{0}</String>
+  <String key="main.statusSaved">已保存</String>
+  <String key="main.dirNotFound">目录不存在：{0}</String>
+
+  <!-- 日志浏览 -->
+  <String key="logs.rootRunning">运行日志</String>
+  <String key="logs.rootHistory">执行历史</String>
+  <String key="logs.previewTooLarge">（文件过大，仅显示最后 200KB）</String>
+  <String key="logs.openFailed">无法打开文件：{0}</String>
+  <String key="logs.readFailed">读取文件失败：{0}</String>
+
+  <!-- 邮件设置 -->
+  <String key="mail.restartNotice">注意：此页配置保存后必须重启服务才能生效（任务 XML 配置无需重启）</String>
+  <String key="mail.host">SMTP服务器</String>
+  <String key="mail.port">端口</String>
+  <String key="mail.address">发件人邮箱</String>
+  <String key="mail.displayName">发件人显示名</String>
+  <String key="mail.password">邮箱密码</String>
+  <String key="mail.showPassword">显示密码</String>
+  <String key="mail.ssl">SSL加密</String>
+  <String key="mail.programName">程序名称</String>
+  <String key="mail.sendTo">通知收件人</String>
+  <String key="mail.infoMessage">Info通知发送给SendTo</String>
+  <String key="mail.btnTestSend">测试发送</String>
+  <String key="mail.configNotFound">未找到 TimerProjectByWindowsService.exe.config，请检查根目录是否选择正确。</String>
+  <String key="mail.loadFailed">读取邮件配置失败：{0}</String>
+  <String key="mail.saveSuccess">邮件设置已保存。需要重启 TimeProject 服务才能生效。是否立即重启？</String>
+  <String key="mail.portInvalid">端口必须为正整数</String>
+  <String key="mail.testInputTitle">测试发送邮件</String>
+  <String key="mail.testInputPrompt">请输入测试邮件收件人地址：</String>
+  <String key="mail.testSuccess">测试邮件发送成功</String>
+  <String key="mail.testFailed">测试邮件发送失败：{0}</String>
+  <String key="mail.testSubject">[TEST]-{0}-邮件发送测试</String>
+  <String key="mail.testBody">这是一封测试邮件，用于验证邮件配置是否正确。发送时间：{0}</String>
+  <String key="mail.missingHost">SMTP服务器不能为空</String>
+  <String key="mail.missingAddress">发件人邮箱不能为空</String>
+  <String key="mail.missingPassword">邮箱密码不能为空</String>
+  <String key="mail.invalidRecipient">收件人地址无效（需包含@）</String>
+
+  <!-- 新建任务 -->
+  <String key="newjob.title">新建任务</String>
+  <String key="newjob.nameCN">中文名：</String>
+  <String key="newjob.nameEN">英文名：</String>
+  <String key="newjob.nameENHint">仅字母/数字/下划线，用作任务文件夹名</String>
+  <String key="newjob.type">类型：</String>
+  <String key="newjob.typeApi">调用API (0)</String>
+  <String key="newjob.typeSequence">顺序执行 (1)</String>
+  <String key="newjob.typeSp">存储过程 (2)</String>
+  <String key="newjob.status">创建后启用</String>
+  <String key="newjob.btnCreate">创建</String>
+  <String key="newjob.nameCNRequired">中文名不能为空</String>
+  <String key="newjob.nameENRequired">英文名不能为空</String>
+  <String key="newjob.nameENInvalid">英文名只能包含字母、数字、下划线</String>
+  <String key="newjob.nameENDuplicate">英文名已存在（任务或文件夹重名）</String>
+  <String key="newjob.createFailed">创建任务失败：{0}</String>
+
+  <!-- 编辑任务 -->
+  <String key="jobedit.title">编辑任务：{0}</String>
+  <String key="jobedit.tabBasic">基本信息</String>
+  <String key="jobedit.tabSchedule">调度设置</String>
+  <String key="jobedit.tabExecute">执行设置</String>
+  <String key="jobedit.tabMail">邮件通知</String>
+  <String key="jobedit.tabSequence">顺序步骤</String>
+  <String key="jobedit.nameCN">中文名：</String>
+  <String key="jobedit.type">类型：</String>
+  <String key="jobedit.enabled">启用任务</String>
+  <String key="jobedit.typeHintApi">Type=0：调用API，需在"执行设置"页填写 ApiUrl</String>
+  <String key="jobedit.typeHintSequence">Type=1：顺序执行，接口与存储过程在"顺序步骤"页配置</String>
+  <String key="jobedit.typeHintSp">Type=2：存储过程，需在"执行设置"页填写 ConnStr 与 StoredProcedure</String>
+  <String key="jobedit.execMode">执行模式：</String>
+  <String key="jobedit.modeInterval">按间隔（秒）</String>
+  <String key="jobedit.modeCycle">按周期</String>
+  <String key="jobedit.intervalsTime">间隔秒数：</String>
+  <String key="jobedit.cycleType">周期类型：</String>
+  <String key="jobedit.everyDay">每天 (EveryDay)</String>
+  <String key="jobedit.everyWeek">每周 (EveryWeek)</String>
+  <String key="jobedit.dayOfWeek">星期：</String>
+  <String key="jobedit.specificTime">执行时间 (HH:mm)：</String>
+  <String key="jobedit.startTime">开始时间（可留空）：</String>
+  <String key="jobedit.endTime">结束时间（可留空）：</String>
+  <String key="jobedit.timeFormatHint">时间格式：yyyy-MM-dd HH:mm</String>
+  <String key="jobedit.apiUrl">API地址：</String>
+  <String key="jobedit.connStr">数据库连接串：</String>
+  <String key="jobedit.btnTestConn">测试连接</String>
+  <String key="jobedit.storedProcedure">存储过程：</String>
+  <String key="jobedit.verification">启用API密钥验证</String>
+  <String key="jobedit.authKey">安全验证密钥：</String>
+  <String key="jobedit.retryCount">失败重试次数 (0-10)：</String>
+  <String key="jobedit.retryInterval">重试间隔（秒）：</String>
+  <String key="jobedit.httpTimeout">HTTP超时（秒）：</String>
+  <String key="jobedit.remark">备注：</String>
+  <String key="jobedit.sendMail">发送通知邮件</String>
+  <String key="jobedit.mailTo">收件人（多个用;分隔）：</String>
+  <String key="jobedit.stepType">步骤类型</String>
+  <String key="jobedit.stepContent">内容</String>
+  <String key="jobedit.stepApi">API地址</String>
+  <String key="jobedit.stepSp">存储过程</String>
+  <String key="jobedit.btnAddRow">添加行</String>
+  <String key="jobedit.btnDelRow">删除行</String>
+  <String key="jobedit.btnMoveUp">上移</String>
+  <String key="jobedit.btnMoveDown">下移</String>
+  <String key="jobedit.saveSuccess">已保存，服务每秒自动加载配置，无需重启</String>
+  <String key="jobedit.saveFailed">保存失败：{0}</String>
+  <String key="jobedit.loadFailed">读取任务配置失败：{0}</String>
+  <String key="jobedit.testConnEmpty">请先填写数据库连接字符串</String>
+  <String key="jobedit.testConnSuccess">连接成功</String>
+  <String key="jobedit.testConnFailed">连接失败：{0}</String>
+  <String key="jobedit.testConnTitle">测试数据库连接</String>
+
+  <!-- 保存校验 -->
+  <String key="val.apiUrlRequired">Type=0 时 ApiUrl 必填</String>
+  <String key="val.stepsRequired">Type=1 时至少需要一个内容非空的步骤</String>
+  <String key="val.connStrRequired">Type=2 时 ConnStr 必填</String>
+  <String key="val.spRequired">Type=2 时 StoredProcedure 必填</String>
+  <String key="val.intervalsInvalid">间隔秒数必须为正数</String>
+  <String key="val.cycleTypeInvalid">周期类型必须为 EveryDay 或 EveryWeek</String>
+  <String key="val.specificTimeInvalid">执行时间格式错误，应为 HH:mm（24小时制）</String>
+  <String key="val.dayOfWeekInvalid">星期必须为 Monday~Sunday</String>
+  <String key="val.startTimeInvalid">开始时间格式错误，应为 yyyy-MM-dd HH:mm</String>
+  <String key="val.endTimeInvalid">结束时间格式错误，应为 yyyy-MM-dd HH:mm</String>
+  <String key="val.mailToInvalid">收件人包含无效邮箱地址（需包含@）</String>
+  <String key="val.retryCountInvalid">重试次数必须为 0-10 的整数</String>
+  <String key="val.retryIntervalInvalid">重试间隔必须为非负整数</String>
+  <String key="val.httpTimeoutInvalid">HTTP超时必须为正整数</String>
+
+  <!-- 星期 -->
+  <String key="dow.Monday">星期一 (Monday)</String>
+  <String key="dow.Tuesday">星期二 (Tuesday)</String>
+  <String key="dow.Wednesday">星期三 (Wednesday)</String>
+  <String key="dow.Thursday">星期四 (Thursday)</String>
+  <String key="dow.Friday">星期五 (Friday)</String>
+  <String key="dow.Saturday">星期六 (Saturday)</String>
+  <String key="dow.Sunday">星期日 (Sunday)</String>
+
+  <!-- 服务管理 -->
+  <String key="svc.statusRunning">运行中</String>
+  <String key="svc.statusStopped">已停止</String>
+  <String key="svc.statusOther">状态：{0}</String>
+  <String key="svc.restartConfirm">重启会中断正在运行的任务，服务停止时会等待在途任务最多20秒。确认重启 TimeProject 服务？</String>
+  <String key="svc.restarting">正在重启服务…</String>
+  <String key="svc.restartSuccess">服务重启成功</String>
+  <String key="svc.restartFailed">服务重启失败：{0}</String>
+  <String key="svc.adminRequired">权限不足。请以管理员身份重新运行本工具，或在管理员命令行执行：net stop TimeProject &amp;&amp; net start TimeProject</String>
+  <String key="svc.notInstalled">TimeProject 服务未安装</String>
+  <String key="svc.stopTimeout">等待服务停止超时（60秒）</String>
+  <String key="svc.startTimeout">等待服务启动超时（60秒）</String>
+</Language>

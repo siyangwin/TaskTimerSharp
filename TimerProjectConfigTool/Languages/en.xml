@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Language name="English" code="en">
+  <!-- Common -->
+  <String key="common.ok">OK</String>
+  <String key="common.cancel">Cancel</String>
+  <String key="common.save">Save</String>
+  <String key="common.refresh">Refresh</String>
+  <String key="common.error">Error</String>
+  <String key="common.success">Success</String>
+  <String key="common.warning">Warning</String>
+  <String key="common.confirm">Confirm</String>
+  <String key="common.exists">Exists</String>
+  <String key="common.missing">Missing</String>
+  <String key="common.enabled">Enabled</String>
+  <String key="common.disabled">Disabled</String>
+  <String key="common.notInstalled">Not installed</String>
+  <String key="common.testing">Testing…</String>
+
+  <!-- Main form -->
+  <String key="main.title">Task Timer Configuration Tool</String>
+  <String key="main.rootDir">Root directory:</String>
+  <String key="main.btnBrowse">Browse…</String>
+  <String key="main.langLabel">Language:</String>
+  <String key="main.serviceStatus">Service status:</String>
+  <String key="main.btnRefreshStatus">Refresh status</String>
+  <String key="main.btnRestartService">Restart service</String>
+  <String key="main.tabJobs">Jobs</String>
+  <String key="main.tabLogs">Logs</String>
+  <String key="main.tabMail">Mail settings</String>
+  <String key="main.colNameCN">Chinese name</String>
+  <String key="main.colNameEN">English name</String>
+  <String key="main.colType">Type</String>
+  <String key="main.colStatus">Status</String>
+  <String key="main.colFolder">Folder</String>
+  <String key="main.colSetup">Setup file</String>
+  <String key="main.colSequence">Sequence file</String>
+  <String key="main.colIssue">Remarks</String>
+  <String key="main.typeApi">Call API</String>
+  <String key="main.typeSequence">Sequence</String>
+  <String key="main.typeSp">Stored procedure</String>
+  <String key="main.btnNewJob">New job</String>
+  <String key="main.btnEdit">Edit</String>
+  <String key="main.btnEnable">Enable</String>
+  <String key="main.btnDisable">Disable</String>
+  <String key="main.btnOpenFolder">Open folder</String>
+  <String key="main.savedNoRestart">Saved. The service reloads config every second; no restart needed.</String>
+  <String key="main.issueNotRegistered">Folder exists, not registered</String>
+  <String key="main.issueNoFolder">Registered, folder missing</String>
+  <String key="main.issueNotRegisteredTip">The task folder exists under Config but has no entry in System.xml, so the service will not run it. Open Edit and save once to register it automatically.</String>
+  <String key="main.issueNoFolderTip">The task is registered in System.xml but its folder is missing under Config (no Setup.xml), so the service cannot run it. Open Edit and save once to recreate the folder and config automatically.</String>
+  <String key="main.detectSummaryWithConfig">Loaded: {0} job(s) under Config, service config file detected</String>
+  <String key="main.detectSummaryNoConfig">Loaded: {0} job(s) under Config, exe.config not detected (mail settings unavailable)</String>
+  <String key="main.selectJobFirst">Please select a job first</String>
+  <String key="main.openFolderFailed">Cannot open folder: {0}</String>
+  <String key="main.loadConfigFailed">Failed to load config: {0}</String>
+  <String key="main.saveFailed">Save failed: {0}</String>
+  <String key="main.statusSaved">Saved</String>
+  <String key="main.dirNotFound">Directory does not exist: {0}</String>
+
+  <!-- Logs -->
+  <String key="logs.rootRunning">Run logs</String>
+  <String key="logs.rootHistory">Execution history</String>
+  <String key="logs.previewTooLarge">(File too large, showing last 200KB only)</String>
+  <String key="logs.openFailed">Cannot open file: {0}</String>
+  <String key="logs.readFailed">Failed to read file: {0}</String>
+
+  <!-- Mail settings -->
+  <String key="mail.restartNotice">Note: changes on this page require a service restart to take effect (job XML config does not).</String>
+  <String key="mail.host">SMTP host</String>
+  <String key="mail.port">Port</String>
+  <String key="mail.address">Sender address</String>
+  <String key="mail.displayName">Display name</String>
+  <String key="mail.password">Password</String>
+  <String key="mail.showPassword">Show password</String>
+  <String key="mail.ssl">SSL</String>
+  <String key="mail.programName">Program name</String>
+  <String key="mail.sendTo">Notification recipients</String>
+  <String key="mail.infoMessage">Send Info messages to SendTo</String>
+  <String key="mail.btnTestSend">Test send</String>
+  <String key="mail.configNotFound">TimerProjectByWindowsService.exe.config not found. Please check the root directory.</String>
+  <String key="mail.loadFailed">Failed to load mail config: {0}</String>
+  <String key="mail.saveSuccess">Mail settings saved. A restart of the TimeProject service is required. Restart now?</String>
+  <String key="mail.portInvalid">Port must be a positive integer</String>
+  <String key="mail.testInputTitle">Send test mail</String>
+  <String key="mail.testInputPrompt">Enter recipient for the test mail:</String>
+  <String key="mail.testSuccess">Test mail sent successfully</String>
+  <String key="mail.testFailed">Test mail failed: {0}</String>
+  <String key="mail.testSubject">[TEST]-{0}-Mail send test</String>
+  <String key="mail.testBody">This is a test mail to verify the mail configuration. Sent at: {0}</String>
+  <String key="mail.missingHost">SMTP host is required</String>
+  <String key="mail.missingAddress">Sender address is required</String>
+  <String key="mail.missingPassword">Password is required</String>
+  <String key="mail.invalidRecipient">Invalid recipient (must contain @)</String>
+
+  <!-- New job -->
+  <String key="newjob.title">New job</String>
+  <String key="newjob.nameCN">Chinese name:</String>
+  <String key="newjob.nameEN">English name:</String>
+  <String key="newjob.nameENHint">Letters/digits/underscore only; used as the job folder name</String>
+  <String key="newjob.type">Type:</String>
+  <String key="newjob.typeApi">Call API (0)</String>
+  <String key="newjob.typeSequence">Sequence (1)</String>
+  <String key="newjob.typeSp">Stored procedure (2)</String>
+  <String key="newjob.status">Enabled after creation</String>
+  <String key="newjob.btnCreate">Create</String>
+  <String key="newjob.nameCNRequired">Chinese name is required</String>
+  <String key="newjob.nameENRequired">English name is required</String>
+  <String key="newjob.nameENInvalid">English name may only contain letters, digits and underscores</String>
+  <String key="newjob.nameENDuplicate">English name already exists (job or folder)</String>
+  <String key="newjob.createFailed">Failed to create job: {0}</String>
+
+  <!-- Edit job -->
+  <String key="jobedit.title">Edit job: {0}</String>
+  <String key="jobedit.tabBasic">Basic</String>
+  <String key="jobedit.tabSchedule">Schedule</String>
+  <String key="jobedit.tabExecute">Execution</String>
+  <String key="jobedit.tabMail">Mail notification</String>
+  <String key="jobedit.tabSequence">Sequence steps</String>
+  <String key="jobedit.nameCN">Chinese name:</String>
+  <String key="jobedit.type">Type:</String>
+  <String key="jobedit.enabled">Job enabled</String>
+  <String key="jobedit.typeHintApi">Type=0: Call API. Fill ApiUrl on the Execution tab.</String>
+  <String key="jobedit.typeHintSequence">Type=1: Sequence. Configure API URLs and stored procedures on the Sequence steps tab.</String>
+  <String key="jobedit.typeHintSp">Type=2: Stored procedure. Fill ConnStr and StoredProcedure on the Execution tab.</String>
+  <String key="jobedit.execMode">Execution mode:</String>
+  <String key="jobedit.modeInterval">By interval (seconds)</String>
+  <String key="jobedit.modeCycle">By cycle</String>
+  <String key="jobedit.intervalsTime">Interval seconds:</String>
+  <String key="jobedit.cycleType">Cycle type:</String>
+  <String key="jobedit.everyDay">Every day (EveryDay)</String>
+  <String key="jobedit.everyWeek">Every week (EveryWeek)</String>
+  <String key="jobedit.dayOfWeek">Day of week:</String>
+  <String key="jobedit.specificTime">Time (HH:mm):</String>
+  <String key="jobedit.startTime">Start time (optional):</String>
+  <String key="jobedit.endTime">End time (optional):</String>
+  <String key="jobedit.timeFormatHint">Time format: yyyy-MM-dd HH:mm</String>
+  <String key="jobedit.apiUrl">API URL:</String>
+  <String key="jobedit.connStr">Connection string:</String>
+  <String key="jobedit.btnTestConn">Test connection</String>
+  <String key="jobedit.storedProcedure">Stored procedure:</String>
+  <String key="jobedit.verification">Enable API key verification</String>
+  <String key="jobedit.authKey">Authentication key:</String>
+  <String key="jobedit.retryCount">Retry count (0-10):</String>
+  <String key="jobedit.retryInterval">Retry interval (s):</String>
+  <String key="jobedit.httpTimeout">HTTP timeout (s):</String>
+  <String key="jobedit.remark">Remark:</String>
+  <String key="jobedit.sendMail">Send notification mail</String>
+  <String key="jobedit.mailTo">Recipients (separate with ;):</String>
+  <String key="jobedit.stepType">Step type</String>
+  <String key="jobedit.stepContent">Content</String>
+  <String key="jobedit.stepApi">API URL</String>
+  <String key="jobedit.stepSp">Stored procedure</String>
+  <String key="jobedit.btnAddRow">Add row</String>
+  <String key="jobedit.btnDelRow">Delete row</String>
+  <String key="jobedit.btnMoveUp">Move up</String>
+  <String key="jobedit.btnMoveDown">Move down</String>
+  <String key="jobedit.saveSuccess">Saved. The service reloads config every second; no restart needed.</String>
+  <String key="jobedit.saveFailed">Save failed: {0}</String>
+  <String key="jobedit.loadFailed">Failed to load job config: {0}</String>
+  <String key="jobedit.testConnEmpty">Please fill in the connection string first</String>
+  <String key="jobedit.testConnSuccess">Connection successful</String>
+  <String key="jobedit.testConnFailed">Connection failed: {0}</String>
+  <String key="jobedit.testConnTitle">Test database connection</String>
+
+  <!-- Save validation -->
+  <String key="val.apiUrlRequired">ApiUrl is required for Type=0</String>
+  <String key="val.stepsRequired">Type=1 requires at least one non-empty step</String>
+  <String key="val.connStrRequired">ConnStr is required for Type=2</String>
+  <String key="val.spRequired">StoredProcedure is required for Type=2</String>
+  <String key="val.intervalsInvalid">Interval seconds must be a positive number</String>
+  <String key="val.cycleTypeInvalid">Cycle type must be EveryDay or EveryWeek</String>
+  <String key="val.specificTimeInvalid">Time must be HH:mm (24-hour)</String>
+  <String key="val.dayOfWeekInvalid">Day of week must be Monday~Sunday</String>
+  <String key="val.startTimeInvalid">Start time must be yyyy-MM-dd HH:mm</String>
+  <String key="val.endTimeInvalid">End time must be yyyy-MM-dd HH:mm</String>
+  <String key="val.mailToInvalid">Recipients contain an invalid address (must contain @)</String>
+  <String key="val.retryCountInvalid">Retry count must be an integer between 0 and 10</String>
+  <String key="val.retryIntervalInvalid">Retry interval must be a non-negative integer</String>
+  <String key="val.httpTimeoutInvalid">HTTP timeout must be a positive integer</String>
+
+  <!-- Days of week -->
+  <String key="dow.Monday">Monday</String>
+  <String key="dow.Tuesday">Tuesday</String>
+  <String key="dow.Wednesday">Wednesday</String>
+  <String key="dow.Thursday">Thursday</String>
+  <String key="dow.Friday">Friday</String>
+  <String key="dow.Saturday">Saturday</String>
+  <String key="dow.Sunday">Sunday</String>
+
+  <!-- Service management -->
+  <String key="svc.statusRunning">Running</String>
+  <String key="svc.statusStopped">Stopped</String>
+  <String key="svc.statusOther">Status: {0}</String>
+  <String key="svc.restartConfirm">Restarting interrupts running jobs; the service waits up to 20s for in-flight jobs on stop. Restart TimeProject now?</String>
+  <String key="svc.restarting">Restarting service…</String>
+  <String key="svc.restartSuccess">Service restarted successfully</String>
+  <String key="svc.restartFailed">Service restart failed: {0}</String>
+  <String key="svc.adminRequired">Insufficient privileges. Re-run this tool as administrator, or run in an elevated command prompt: net stop TimeProject &amp;&amp; net start TimeProject</String>
+  <String key="svc.notInstalled">TimeProject service is not installed</String>
+  <String key="svc.stopTimeout">Timed out waiting for the service to stop (60s)</String>
+  <String key="svc.startTimeout">Timed out waiting for the service to start (60s)</String>
+</Language>
