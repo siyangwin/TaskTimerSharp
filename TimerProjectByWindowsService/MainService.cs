@@ -1,11 +1,10 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Configuration;
 using System.Data;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
-using System.Linq;
 using System.Net.Mail;
 using System.ServiceProcess;
 using System.Text;
@@ -17,200 +16,71 @@ namespace TimerProjectByWindowsService
 {
     public partial class MainService : ServiceBase
     {
-        //创建一个系统定时器
-        System.Timers.Timer TimerProjectJob;  //计时器
+        //任务类型
+        private enum JobKind
+        {
+            Api,                //Type=0 调用单个API
+            Sequence,           //Type=1 顺序执行(API+存储过程)
+            StoredProcedure     //Type=2 独立执行存储过程
+        }
+
+        //主定时器
+        private System.Timers.Timer TimerProjectJob;
 
         //读取公共配置
-        public static readonly string ProgramName = ConfigurationSettings.AppSettings["ProgramName"]; //程序名称,表明当前是哪只定时程序
-        public static readonly string SendTo = ConfigurationSettings.AppSettings["SendTo"];           //ACTION通知会加入以下邮件地址和程序配置地址一起发送
-        public static readonly string InfoMessage = ConfigurationSettings.AppSettings["InfoMessage"]; //Info通知,是否加入SendTo配置地址一起发送 true:发送 false:不发送
+        public static readonly string ProgramName = ConfigurationManager.AppSettings["ProgramName"]; //程序名称,表明当前是哪只定时程序
+        public static readonly string SendTo = ConfigurationManager.AppSettings["SendTo"];           //ACTION通知会加入以下邮件地址和程序配置地址一起发送
+        public static readonly string InfoMessage = ConfigurationManager.AppSettings["InfoMessage"]; //Info通知,是否加入SendTo配置地址一起发送 true:发送 false:不发送
+
+        //HTTP请求默认超时(毫秒)。可在Setup.xml用HttpTimeout(单位:秒)覆盖
+        private const int DefaultHttpTimeoutMs = 10 * 60 * 1000;
 
         //实例化文件类
-        LocalFile File = new LocalFile();
-        SendMail Send = new SendMail();
+        private readonly LocalFile localFile = new LocalFile();
+        private readonly SendMail Send = new SendMail();
+
+        //job子定时器注册表(停止服务/移除任务时需要找到并停掉它们)
+        private readonly Dictionary<string, System.Timers.Timer> _jobTimers = new Dictionary<string, System.Timers.Timer>();
+        private readonly object _jobTimersLock = new object();
+
+        //主循环重入标记
+        private int _mainTickRunning;
+
+        //最近一次"每日重置"对应的日期
+        private DateTime _lastResetDate = DateTime.Today;
+
         public MainService()
         {
             InitializeComponent();
         }
 
-        //判断执行状态,开始执行标记为1，执行完后标记为0
-        public static int OnStartStatus=0;
+        #region 服务启动/停止
 
         //服务启动执行代码
         protected override void OnStart(string[] args)
         {
             try
             {
-                EventLog.WriteEntry("我的服务启动");//在系统事件查看器里的应用程序事件里来源的描述
-                WiterLog("System", "我的服务启动" + Thread.CurrentThread.ManagedThreadId.ToString("00"));
+                TryWriteEventLog("我的服务启动");
+                WiterLog("System", "我的服务启动");
 
-                //初始化 全局变量
-                PassValue.TimeProject = new List<string>();//存储目前所有正在运行的Job 系统级别
+                //初始化全局状态
+                PassValue.ClearRunningJobs();
+                PassValue.UnlockAllJobs();
+                PassValue.ClearExecutedToday();
+                _lastResetDate = DateTime.Today;
 
-                PassValue.TimeProjectJob = new List<string>();//存储目前正在运行中的Job  避免重复运行同一方法
-
-                //初始化
+                //初始化主定时器,每秒扫描一次系统配置
                 TimerProjectJob = new System.Timers.Timer();
-                //设定定时时间  最小单位是1秒
-                TimerProjectJob.Interval = 1000;  //设置计时器事件间隔执行时间
-
-                //设置定时执行方法  到达时间的时候执行事件； 
-                TimerProjectJob.Elapsed += new System.Timers.ElapsedEventHandler(TimerProjectJob_Elapsed);
-
-                TimerProjectJob.AutoReset = true;//设置是执行一次（false）还是一直执行(true)； 
-
-                TimerProjectJob.Enabled = true; //是否执行System.Timers.Timer.Elapsed事件；
+                TimerProjectJob.Interval = 1000;
+                TimerProjectJob.Elapsed += TimerProjectJob_Elapsed;
+                TimerProjectJob.AutoReset = true;
+                TimerProjectJob.Enabled = true;
             }
             catch (Exception ex)
             {
-                //执行出现问题,发邮件给管理员
-                //[ACTION] -XXXX
-                SendActionEmail(null, "System", "SystemOnStart", ex.Message,ex.ToString());
-            }
-        }
-
-        //主程序开始运行 Main program
-        private void TimerProjectJob_Elapsed(object sender, System.Timers.ElapsedEventArgs e)
-        {
-            try
-            {
-                //每天晚上到23:59:59的时候清空 按周期执行的存储数据， 便于第二天继续执行
-                if (DateTime.Now.ToString("HH:mm:ss")=="23:59:59")
-                {
-                    PassValue.ExecutionStatus = new List<string>();
-                }
-
-                if (OnStartStatus == 1)
-                {
-                    WiterLog("System1", "上一轮还没有执行完毕,等待。");
-                    return;
-                }
-
-                OnStartStatus =1;
-
-                //检查本地需要启动多少Job程序
-                //获取配置文件根目录
-                string basePath = File.LocalConfig();
-
-                //拼接System应该存在的配置文件路径
-                string ConfigPath = Path.Combine(basePath, "System");
-
-                //检查目录是否存在,不存在则创建
-                if (File.DirectoryIsExist(ConfigPath))
-                {
-                    //获取Xml配置的信息
-                    DataTable dt = File.GetXmlInfo(ConfigPath, "TimeProjectJob.xml");
-
-                    if (dt != null && dt.Rows.Count > 0)
-                    {
-                        //记录所有的Job
-                        List<string> TimeProjectJob = new List<string>();
-
-                        for (int i = 0; i < dt.Rows.Count; i++)
-                        {
-                            string NameCN = dt.Rows[i]["NameCN"].ToString().Trim();
-                            string NameEN = dt.Rows[i]["NameEN"].ToString().Trim();
-                            string Status = dt.Rows[i]["Status"].ToString().ToLower().Trim();
-                            string Type = dt.Rows[i]["Type"].ToString().Trim();
-
-                            //WiterLog("System", "NameCN：" + NameCN + ";NameEN:"+NameEN + ";Status:"+ Status+ ";Type:"+ Type);
-
-                            if (NameEN != "" && Status == "true")
-                            {
-                                if (Type == "0")
-                                {
-                                    //将可以正常执行的Job写入List，用于去掉需要排除掉的Job
-                                    TimeProjectJob.Add(NameEN);
-                                    if (PassValue.TimeProject == null || !PassValue.TimeProject.Contains(NameEN))
-                                    {
-                                        //添加到列表上储存起来
-                                        PassValue.TimeProject.Add(NameEN);
-                                        WiterLog("System", "开始运行ApiInfo：" + NameCN + "(" + NameEN + ")" + Thread.CurrentThread.ManagedThreadId.ToString("00"));
-                                        ApiInfo(NameEN);
-                                        System.Threading.Thread.Sleep(1000);
-                                    }
-                                }
-                                else if (Type == "1")
-                                {
-                                    //将可以正常执行的Job写入List，用于去掉需要排除掉的Job
-                                    TimeProjectJob.Add(NameEN);
-                                    if (PassValue.TimeProject == null || !PassValue.TimeProject.Contains(NameEN))
-                                    {
-                                        //添加到列表上储存起来
-                                        PassValue.TimeProject.Add(NameEN);
-                                        WiterLog("System", "开始运行APISequence：" + NameCN + "(" + NameEN + ")" + Thread.CurrentThread.ManagedThreadId.ToString("00"));
-                                        APISequence(NameEN);
-                                        System.Threading.Thread.Sleep(1000);
-                                    }
-                                }
-                                else
-                                {
-                                    WiterLog("System", "TimeProjectJob.xml中[" + NameCN + "(" + NameEN + ")]配置Type錯誤,无法执行");
-
-                                    //执行出现问题,发邮件给管理员
-                                    //[ACTION] -XXXX
-                                    SendActionEmail(null, "System", "System", "System配置错误", "TimeProjectJob.xml中["+ NameCN + "("+NameEN+ ")]配置Type錯誤,无法执行");
-                                }
-                            }
-                        }
-
-                        //PassValue.TimeProject目前所有正在执行的job,需要去掉没有在TimeProjectJob中出现的数据
-                        //WiterLog("System", "正在运行数量：" + PassValue.TimeProject.Count() + "!");
-                        //倒叙排列 
-                        for (int i = PassValue.TimeProject.Count()-1; i >= 0; i--)
-                        {
-                            //是否存在于该执行的Job中
-                            if (!TimeProjectJob.Contains(PassValue.TimeProject[i]))
-                            {
-                                //不存在 则移除
-                                string TimeProjectFun = PassValue.TimeProject[i];
-                                PassValue.TimeProject.Remove(TimeProjectFun);
-
-                                WiterLog("System", "停止运行" + TimeProjectFun + "!");
-                            }
-                        }
-                    }
-                    else
-                    {
-                        //没有数据
-                        //停止所有程序的运行 赋空值
-                        PassValue.TimeProject = new List<string>();
-                    }
-                }
-
-                //本轮执行完毕，赋值0，便于开启下轮启动
-                OnStartStatus = 0;
-                #region 多线程
-                //TaskFactory taskFactory = new TaskFactory();
-                //List<Task> tasks = new List<Task>();
-                //tasks.Add(taskFactory.StartNew());
-                //tasks.Add(taskFactory.StartNew());
-                //tasks.Add(taskFactory.StartNew());
-                //tasks.Add(taskFactory.StartNew());
-                //tasks.Add(taskFactory.StartNew());
-                //tasks.Add(taskFactory.StartNew());
-                //tasks.Add(taskFactory.StartNew());
-                //tasks.Add(taskFactory.StartNew());
-                //tasks.Add(taskFactory.StartNew());
-
-                //tasks[0].
-
-                //taskFactory.ContinueWhenAll(tasks.ToArray(),)
-                #endregion
-
-            }
-            catch (Exception ex)
-            {
-                //本轮执行完毕，赋值0，便于开启下轮启动
-                OnStartStatus = 0;
-
-                EventLog.WriteEntry("我正在执行System_Time,出现问题：" + ex.Message + "!");//在系统事件查看器里的应用程序事件里来源的描述
-                WiterLog("System", "我正在执行System_Time,出现问题：" + ex.Message + "!");
-                WiterLog("System", "我正在执行System_Time,出现问题：" + ex.ToString() + "!");
-
-                //执行出现问题,发邮件给管理员
-                //[ACTION] -XXXX
-                SendActionEmail(null, "System", "System", ex.Message, ex.ToString());
+                TryWriteEventLog("服务启动失败：" + ex);
+                SendActionEmail(null, "System", "SystemOnStart", ex.Message, ex.ToString());
             }
         }
 
@@ -219,938 +89,862 @@ namespace TimerProjectByWindowsService
         {
             try
             {
-                //清空执行锁定程序 便于下次执行
-                PassValue.TimeProjectJob = new List<string>();
+                //先停主定时器,不再派发新任务
+                if (TimerProjectJob != null)
+                {
+                    TimerProjectJob.Enabled = false;
+                    TimerProjectJob.Dispose();
+                    TimerProjectJob = null;
+                }
 
-                //停止Timer执行
-                TimerProjectJob.Enabled = false;
-                EventLog.WriteEntry("我的服务停止");
+                //停掉所有job子定时器
+                List<System.Timers.Timer> timers;
+                lock (_jobTimersLock)
+                {
+                    timers = new List<System.Timers.Timer>(_jobTimers.Values);
+                    _jobTimers.Clear();
+                }
+                foreach (var timer in timers)
+                {
+                    timer.Enabled = false;
+                    timer.Dispose();
+                }
+                PassValue.ClearRunningJobs();
+
+                //等待在途任务结束,最多20秒,避免被SCM强杀时中断正在执行的API/存储过程
+                DateTime deadline = DateTime.Now.AddSeconds(20);
+                while (PassValue.HasLockedJobs() && DateTime.Now < deadline)
+                {
+                    Thread.Sleep(500);
+                }
+                PassValue.UnlockAllJobs();
+
+                TryWriteEventLog("我的服务停止");
                 WiterLog("System", "我的服务停止");
-
             }
             catch (Exception ex)
             {
-                EventLog.WriteEntry("我正在执行停止运行,出现问题：" + ex.Message + "!");//在系统事件查看器里的应用程序事件里来源的描述
-                WiterLog("System", "我正在执行停止运行,出现问题：" + ex.Message + "!");
-                WiterLog("System", "我正在执行停止运行,出现问题：" + ex.ToString() + "!");
-
-                //执行出现问题,发邮件给管理员
-                //[ACTION] -XXXX
+                TryWriteEventLog("停止服务出现问题：" + ex);
+                WiterLog("System", "我正在执行停止运行,出现问题：" + ex);
                 SendActionEmail(null, "System", "SystemOnStop", ex.Message, ex.ToString());
             }
-
         }
 
-        #region  调用API
-        //开始执行异步方法
-        public async void ApiInfo(string Fun)
+        #endregion
+
+        #region 主循环：扫描系统配置,启动/停止Job
+
+        private void TimerProjectJob_Elapsed(object sender, System.Timers.ElapsedEventArgs e)
         {
-            await Task.Run(() =>
+            //防止上一轮还没跑完时重入
+            if (Interlocked.CompareExchange(ref _mainTickRunning, 1, 0) != 0)
             {
-                try
-                {
-                    //定义全局时间,用来执行时间间隔
-                    DateTime Time = new DateTime();
+                return;
+            }
 
-                    //创建一个定时器
-                    System.Timers.Timer TimerProject;  //计时器
-
-                    //初始化
-                    TimerProject = new System.Timers.Timer();
-                    //设定定时时间  最小单位是1秒
-                    TimerProject.Interval = 1000;  //设置计时器事件间隔执行时间
-
-                    //设置定时执行方法  到达时间的时候执行事件； 
-                    //TimerProject.Elapsed += new System.Timers.ElapsedEventHandler(TimerProject_Elapsed);
-                    TimerProject.Elapsed += new System.Timers.ElapsedEventHandler((o, e) => TimerProject_Elapsed(o, e, Fun, TimerProject));
-
-                    TimerProject.AutoReset = true;//设置是执行一次（false）还是一直执行(true)； 
-                                                  //打开Timer执行
-                    TimerProject.Enabled = true; //是否执行System.Timers.Timer.Elapsed事件；
-                }
-                catch (Exception ex)
-                {
-                    EventLog.WriteEntry("我正在执行" + Fun + "-ApiInfo,出现问题：" + ex.Message + "!");//在系统事件查看器里的应用程序事件里来源的描述
-                    WiterLog(Fun, "我正在执行" + Fun + "-ApiInfo,出现问题：" + ex.Message + "!");
-                    WiterLog(Fun, "我正在执行" + Fun + "-ApiInfo,,出现问题：" + ex.ToString() + "!");
-
-                    //执行出现问题,发邮件给管理员
-                    //[ACTION] -XXXX
-                    SendActionEmail(null, Fun, Fun + "-ApiInfo", ex.Message, ex.ToString());
-                }
-            });
-        }
-
-        //定时程序执行方法
-        private void TimerProject_Elapsed(object sender, System.Timers.ElapsedEventArgs e, string Fun, System.Timers.Timer TimerProject)
-        {
-            //記錄方法配置
-            DataTable dt = new DataTable();
             try
             {
-                //判断程序是否还需要执行
-                //不存在与程序执行List中,停止运行程序
-                if (!PassValue.TimeProject.Contains(Fun))
+                //日期变化时清空"今天已执行"记录(不再依赖恰好命中23:59:59那一秒)
+                if (DateTime.Today != _lastResetDate)
                 {
-                    WiterLog(Fun, "停止运行ApiInfo" + Fun + "-Time!");
+                    PassValue.ClearExecutedToday();
+                    _lastResetDate = DateTime.Today;
+                    WiterLog("System", "日期变更,已清空周期任务今日执行记录");
+                }
 
-                    //将标注每个Fun准确的执行时间中的数据清除，便于下次执行
-                    PassValue.ExecutionStatusByTime.Remove(Fun);
+                //获取配置文件根目录,拼接System配置文件路径
+                string basePath = localFile.LocalConfig();
+                string configPath = Path.Combine(basePath, "System");
+                if (!Directory.Exists(configPath))
+                {
+                    Directory.CreateDirectory(configPath);
+                }
 
-                    //将今天已经执行过的周期记录也清除掉，便于下次执行
-                    PassValue.ExecutionStatus.Remove(Fun);
-
-                    //清除执行锁定程序 便于下次执行
-                    PassValue.TimeProjectJob.Remove(Fun);
-
-                    TimerProject.Enabled = false;
+                DataTable dt = localFile.GetXmlInfo(configPath, "TimeProjectJob.xml");
+                if (dt == null || dt.Rows.Count == 0)
+                {
+                    //没有配置数据,停止所有job
+                    foreach (string running in PassValue.GetRunningJobs())
+                    {
+                        StopJob(running, true);
+                    }
                     return;
                 }
 
-                //WiterLog(Fun, "我正在执行ApiInfo" + Fun + "-Time!");
-
-                //获取配置文件根目录
-                string basePath = File.LocalConfig();
-
-                //拼接System应该存在的配置文件路径
-                string ConfigPath = Path.Combine(basePath, Fun);
-
-                //检查目录是否存在,不存在则创建
-                if (File.DirectoryIsExist(ConfigPath))
+                List<string> activeJobs = new List<string>();
+                for (int i = 0; i < dt.Rows.Count; i++)
                 {
-                    //获取Xml配置的信息
-                     dt = File.GetXmlInfo(ConfigPath, Fun + "_Setup.xml");
-                    //判断是否有数据
-                    if (dt != null && dt.Rows.Count > 0)
+                    string nameCN = GetRowField(dt, i, "NameCN");
+                    string nameEN = GetRowField(dt, i, "NameEN");
+                    string status = GetRowField(dt, i, "Status");
+                    string type = GetRowField(dt, i, "Type");
+
+                    if (nameEN == "" || !status.Equals("true", StringComparison.OrdinalIgnoreCase))
                     {
-                        DateTime NowTime = DateTime.Now;
-                        //无论有多少行，只取第一行
-                        //开始时间 <!--开始时间 yyyy-MM-dd HH:mm  24小时制 没有则留空 与结束时间无需成对-->
-                        string StartTime = dt.Rows[0]["StartTime"].ToString().Trim();
-                        if (!string.IsNullOrWhiteSpace(StartTime))
-                        {
-                            //判断是否到达约定时间  当前时间小于等于开始时间的时候 直接结束
-                            if (NowTime < Convert.ToDateTime(StartTime))
-                            {
-                                WiterLog(Fun, Fun + "-Time,当前时间："+ NowTime .ToString()+ "还没有到达开始时间："+StartTime+",不能开始执行程序");
-                                return;
-                            }
-                        }
+                        continue;
+                    }
 
-                        //结束时间 <!--结束时间 yyyy-MM-dd  HH:mm 24小时制 没有则留空 与开始时间无需成对--->
-                        string EndTime = dt.Rows[0]["EndTime"].ToString().Trim();
-                        if (!string.IsNullOrWhiteSpace(EndTime))
-                        {
-                            //判断是否到达约定时间  当前时间大于结束时间的时候 直接结束
-                            if (NowTime > Convert.ToDateTime(EndTime))
-                            {
-                                WiterLog(Fun, Fun + "-Time,当前时间：" + NowTime.ToString() + "已经超过结束时间：" + EndTime + ",不能开始执行程序");
-                                return;
-                            }
-                        }
+                    JobKind kind;
+                    if (type == "0") kind = JobKind.Api;
+                    else if (type == "1") kind = JobKind.Sequence;
+                    else if (type == "2") kind = JobKind.StoredProcedure;
+                    else
+                    {
+                        WiterLog("System", "TimeProjectJob.xml中[" + nameCN + "(" + nameEN + ")]配置Type错误(支持0/1/2),无法执行");
+                        SendActionEmail(dt, "System", "System", "System配置错误", "TimeProjectJob.xml中[" + nameCN + "(" + nameEN + ")]配置Type错误(支持0/1/2),无法执行");
+                        continue;
+                    }
 
-                        //判断执行类型 <!--执行类型 0:按时间间隔 1:按周期-->
-                        string ExecutionStatus = dt.Rows[0]["ExecutionStatus"].ToString().Trim();
-                        if (ExecutionStatus == "0")//0:按时间间隔
-                        {
-                            //获取时间间隔
-                            string IntervalsTime = dt.Rows[0]["IntervalsTime"].ToString().Trim();
-                            if (IntervalsTime == "")
-                            {
-                                WiterLog(Fun, Fun + "_Setup.xml中IntervalsTime配置错误,无法执行。请按照说明调整(时间间隔 单位:秒)。");
+                    activeJobs.Add(nameEN);
+                    StartJob(nameEN, nameCN, kind);
+                }
 
-                                SendActionEmail(dt, Fun, Fun + "-Time", "配置错误", Fun + "_Setup.xml中IntervalsTime配置错误,无法执行。请按照说明调整(时间间隔 单位:秒)。");
-                                return;
-                            }
-                            else
-                            {
-                                //判断是第一次进方法就给全局时间赋当前时间
-                                if (!PassValue.ExecutionStatusByTime.ContainsKey(Fun))
-                                {
-                                    //添加准确执行时间到数组上
-                                    PassValue.ExecutionStatusByTime.Add(Fun, DateTime.Now);
-                                    //执行 全局时间赋值在主程序里面
-                                    ApiInfoLoadData(Fun, dt, "时间间隔,第一次执行");  //第一次执行
-                                    return;
-                                }
-                                else
-                                {
-                                    DateTime Time = PassValue.ExecutionStatusByTime[Fun];
-                                    //设置时间相等时 执行不进去,设置时间小于 执行一次 并马上赋值Time为目前时间
-                                    if (Time.AddSeconds(double.Parse(IntervalsTime)) <= DateTime.Now)
-                                    {
-                                        //执行
-                                        ApiInfoLoadData(Fun, dt,"时间间隔,第二次执行"); //第二次执行
-                                        return;
-                                    }
-                                }
-                            }
-                        }
-                        else if (ExecutionStatus == "1")//1:按周期
-                        {
-                            //周期选择 ： EveryDay EveryWeek
-                            string CycltType = dt.Rows[0]["CycltType"].ToString().Trim();
-
-                            //分析周期
-                            if (CycltType.ToLower() == "everyweek")
-                            {
-                                //星期几 ： Monday  Tuesday Wednesday Thursday  Friday  Saturday  Sunday
-                                string DayOfWeek = dt.Rows[0]["DayOfWeek"].ToString().Trim();
-                                //判断星期几是否符合
-                                if (DayOfWeek.ToLower() == DateTime.Today.DayOfWeek.ToString().ToLower())
-                                {
-                                    //获取 特定时间：HH:mm 24小时制 不包含秒
-                                    string SpecificTime = dt.Rows[0]["SpecificTime"].ToString().Trim();
-                                    //去掉秒,执行准确
-                                    if (Convert.ToInt32(Convert.ToDateTime(SpecificTime).ToString("HHmm")) == Convert.ToInt32(DateTime.Now.ToString("HHmm")))
-                                    {
-                                        //今天是否有执行过,未执行过才能执行，否则这一分钟会执行60次
-                                        if (!PassValue.ExecutionStatus.Contains(Fun))
-                                        {
-                                            //将当前执行方法添加到List中,每天晚上00:00 清空这个List
-                                            PassValue.ExecutionStatus.Add(Fun);
-                                            //执行方法
-                                            ApiInfoLoadData(Fun, dt, "周期");//周期
-                                            return;
-                                        }
-                                    }
-                                }
-                            }
-                            else if (CycltType.ToLower() == "everyday")
-                            {
-                                //获取 特定时间：HH:mm 24小时制 不包含秒
-                                string SpecificTime = dt.Rows[0]["SpecificTime"].ToString().Trim();
-                                //去掉秒,执行准确
-                                if (Convert.ToInt32(Convert.ToDateTime(SpecificTime).ToString("HHmm")) == Convert.ToInt32(DateTime.Now.ToString("HHmm")))
-                                {
-                                    //今天是否有执行过,未执行过才能执行，否则这一分钟会执行60次
-                                    if (!PassValue.ExecutionStatus.Contains(Fun))
-                                    {
-                                        //将当前执行方法添加到List中,每天晚上00:00 清空这个List
-                                        PassValue.ExecutionStatus.Add(Fun);
-                                        //执行方法
-                                        ApiInfoLoadData(Fun, dt,"周期");//周期
-                                        return;
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                WiterLog(Fun, "我正在执行ApiInfo_" + Fun + "_Time,配置文件：CycltType 配置错误,请按照说明调整（周期选择 ： EveryDay EveryWeek）!");
-
-                                SendActionEmail(dt, Fun, Fun + "-Time", "配置错误", Fun + "_Setup.xml中CycltType配置错误,无法执行。请按照说明调整(周期选择:EveryDay EveryWeek)。");
-                            }
-                        }
-                        else
-                        {
-                            WiterLog(Fun, "我正在执行ApiInfo_" + Fun + "_Time,配置文件：ExecutionStatus 配置错误,请按照说明调整（执行类型 0:按时间间隔 1:按周期）!");
-                            SendActionEmail(dt, Fun, Fun + "-Time", "配置错误", Fun + "_Setup.xml中ExecutionStatus配置错误,无法执行。请按照说明调整(执行类型 0:按时间间隔 1:按周期)。");
-                            return;
-                        }
+                //停止已不在配置中(或被改为停止)的job
+                foreach (string running in PassValue.GetRunningJobs())
+                {
+                    if (!activeJobs.Contains(running))
+                    {
+                        StopJob(running, true);
                     }
                 }
             }
             catch (Exception ex)
             {
-                EventLog.WriteEntry("我正在执行ApiInfo_" + Fun + "_Time,出现问题：" + ex.Message + "!");//在系统事件查看器里的应用程序事件里来源的描述
-                WiterLog(Fun, "我正在执行ApiInfo_" + Fun + "_Time,出现问题：" + ex.Message + "!");
-                WiterLog(Fun, "我正在执行ApiInfo_" + Fun + "_Time,出现问题：" + ex.ToString() + "!");
-
-                //执行出现问题,发邮件给管理员
-                //[ACTION] -XXXX
-                SendActionEmail(dt, Fun, Fun + "-Time", ex.Message, ex.ToString());
+                TryWriteEventLog("主循环出现问题：" + ex.Message);
+                WiterLog("System", "我正在执行System_Time,出现问题：" + ex);
+                SendActionEmail(null, "System", "System", ex.Message, ex.ToString());
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _mainTickRunning, 0);
             }
         }
 
-
-        /// <summary>
-        /// 调用Api时候的主程序
-        /// </summary>
-        /// <param name="Fun">方法名称</param>
-        /// <param name="dt">传过来配置信息,便于继续往下执行</param>
-        /// <param name="num">是第一次执行,还是第二次执行</param>
-        public void ApiInfoLoadData(string Fun, DataTable dt,string Info)
+        //为一个任务启动独立子定时器(已启动则忽略)
+        private void StartJob(string fun, string nameCN, JobKind kind)
         {
-            //判断当前方法是否在运行 还在运行则不允许继续执行
-            if (PassValue.TimeProjectJob.Contains(Fun))
+            lock (_jobTimersLock)
             {
-                WiterLog(Fun, "程序还未处理完成，锁定执行");
-                return;
+                if (_jobTimers.ContainsKey(fun)) return;
             }
 
-            string ApiUrl = dt.Rows[0]["ApiUrl"].ToString().Trim();
-            if (string.IsNullOrWhiteSpace(ApiUrl))
-            {
-                WiterLog(Fun, Fun + "_Setup.xml中ApiUrl配置错误,无法执行。请按照说明调整(Api 请求地址)。");
+            //周期任务:根据执行历史恢复"今日已执行"状态,防止服务重启后当天重复执行
+            RestoreExecutedTodayFromHistory(fun);
 
-                SendActionEmail(dt, Fun, Fun + "-ApiInfo", "配置错误", Fun + "_Setup.xml中ApiUrl配置错误,无法执行。请按照说明调整(Api 请求地址)。");
-                return;
-            }
+            System.Timers.Timer timer = new System.Timers.Timer(1000) { AutoReset = true };
+            timer.Elapsed += (o, e) => JobTimer_Elapsed(fun, kind);
 
-            //获取是否需要安全验证，是则必须填写验证密钥
-            string Verification= dt.Rows[0]["Verification"].ToString().Trim();
-            string AuthenticationKey = dt.Rows[0]["AuthenticationKey"].ToString().Trim();
-            if (Verification.ToLower()=="true")
+            lock (_jobTimersLock)
             {
-                if (AuthenticationKey == "")
+                if (_jobTimers.ContainsKey(fun))
                 {
-                    WiterLog(Fun, Fun + "_Setup.xml中AuthenticationKey配置错误,无法执行。请按照说明调整(请求安全验证之密钥)。");
-
-                    SendActionEmail(dt, Fun, Fun + "-ApiInfo", "配置错误", Fun + "_Setup.xml中AuthenticationKey配置错误,无法执行。请按照说明调整(请求安全验证之密钥)。");
+                    timer.Dispose();
                     return;
+                }
+                _jobTimers[fun] = timer;
+            }
+
+            PassValue.AddRunningJob(fun);
+            timer.Enabled = true;
+            WiterLog("System", "开始运行" + KindName(kind) + "：" + nameCN + "(" + fun + ")");
+        }
+
+        //停止一个任务的子定时器并清理其运行状态
+        private void StopJob(string fun, bool log)
+        {
+            System.Timers.Timer timer = null;
+            lock (_jobTimersLock)
+            {
+                if (_jobTimers.TryGetValue(fun, out timer))
+                {
+                    _jobTimers.Remove(fun);
+                }
+            }
+
+            PassValue.RemoveRunningJob(fun);
+
+            if (timer != null)
+            {
+                timer.Enabled = false;
+                timer.Dispose();
+            }
+
+            PassValue.RemoveLastRunTime(fun);
+            PassValue.UnmarkExecutedToday(fun);
+            PassValue.UnlockJob(fun);
+
+            if (log)
+            {
+                WiterLog("System", "停止运行" + fun + "!");
+            }
+        }
+
+        //服务重启后,根据执行历史判断周期任务今天是否已成功执行过
+        private void RestoreExecutedTodayFromHistory(string fun)
+        {
+            try
+            {
+                string configPath = Path.Combine(localFile.LocalConfig(), fun);
+                DataTable dt = localFile.GetXmlInfo(configPath, fun + "_Setup.xml");
+                if (dt == null || dt.Rows.Count == 0) return;
+
+                string mode = GetField(dt, "ExecutionStatus");
+                if (mode == "1" && JobHistory.HasSuccessToday(fun))
+                {
+                    PassValue.MarkExecutedToday(fun);
+                    WiterLog(fun, "根据执行历史,今天已成功执行过该周期任务,今日不再重复执行");
+                }
+            }
+            catch (Exception ex)
+            {
+                WiterLog(fun, "恢复今日执行状态失败：" + ex.Message);
+            }
+        }
+
+        private static string KindName(JobKind kind)
+        {
+            switch (kind)
+            {
+                case JobKind.Api: return "调用API";
+                case JobKind.Sequence: return "顺序执行";
+                case JobKind.StoredProcedure: return "执行存储过程";
+                default: return kind.ToString();
+            }
+        }
+
+        #endregion
+
+        #region Job调度（三种任务类型共用）
+
+        //每个job子定时器的调度入口:读取Setup.xml,判断是否到了执行时间
+        private void JobTimer_Elapsed(string fun, JobKind kind)
+        {
+            try
+            {
+                //任务已被主循环移除,自行停止
+                if (!PassValue.ContainsRunningJob(fun))
+                {
+                    WiterLog(fun, "停止运行" + KindName(kind) + fun + "-Time!");
+                    StopJob(fun, false);
+                    return;
+                }
+
+                string configPath = Path.Combine(localFile.LocalConfig(), fun);
+                if (!Directory.Exists(configPath))
+                {
+                    Directory.CreateDirectory(configPath);
+                }
+
+                DataTable dt = localFile.GetXmlInfo(configPath, fun + "_Setup.xml");
+                if (dt == null || dt.Rows.Count == 0)
+                {
+                    return;
+                }
+
+                DateTime now = DateTime.Now;
+
+                //开始时间(可选)
+                string startTime = GetField(dt, "StartTime");
+                if (!string.IsNullOrWhiteSpace(startTime))
+                {
+                    DateTime parsedStart;
+                    if (!TryParseDateTime(startTime, out parsedStart))
+                    {
+                        ConfigAlert(dt, fun, fun + "-Time", fun + "_Setup.xml中StartTime格式错误(应为yyyy-MM-dd HH:mm),当前值：" + startTime);
+                        return;
+                    }
+                    if (now < parsedStart) return; //未到开始时间,静默等待
+                }
+
+                //结束时间(可选)
+                string endTime = GetField(dt, "EndTime");
+                if (!string.IsNullOrWhiteSpace(endTime))
+                {
+                    DateTime parsedEnd;
+                    if (!TryParseDateTime(endTime, out parsedEnd))
+                    {
+                        ConfigAlert(dt, fun, fun + "-Time", fun + "_Setup.xml中EndTime格式错误(应为yyyy-MM-dd HH:mm),当前值：" + endTime);
+                        return;
+                    }
+                    if (now > parsedEnd) return; //已过结束时间,静默等待
+                }
+
+                string mode = GetField(dt, "ExecutionStatus");
+                if (mode == "0")
+                {
+                    ScheduleByInterval(fun, kind, dt, now);
+                }
+                else if (mode == "1")
+                {
+                    ScheduleByCycle(fun, kind, dt, now);
                 }
                 else
                 {
-                    //拼接新的Url
-                    string time = LocalFile.GetTimeStampByMilliseconds();
-                    ApiUrl += "?Timestamp=" + time + "&SyncKey=" + LocalFile.GetSha1(AuthenticationKey + time);
+                    ConfigAlert(dt, fun, fun + "-Time", fun + "_Setup.xml中ExecutionStatus配置错误,无法执行。请按照说明调整(执行类型 0:按时间间隔 1:按周期)。");
                 }
-            }
-
-            //当前时间赋值给全局时间 方便下次循环
-            //判断是否存在数据在全局变量里面
-            if (PassValue.ExecutionStatusByTime.ContainsKey(Fun))
-            {
-                //PassValue.ExecutionStatusByTime.Remove(Fun);
-                //存在,修改
-                PassValue.ExecutionStatusByTime[Fun]= DateTime.Now;
-            }
-            else
-            {
-                //不存在添加
-                PassValue.ExecutionStatusByTime.Add(Fun, DateTime.Now);
-            }
-
-            //将当前方法写入List  避免重复执行
-            PassValue.TimeProjectJob.Add(Fun);
-
-            WiterLog(Fun, Info + ",程序开始执行!");
-            try
-            {
-                string AliResult = HttpRequest.HttpGet(ApiUrl, "", 2 * 60 * 60 * 1000); //设置4个小时的超时时间
-
-                WiterLog(Fun, "返回数据：" + AliResult);
-
-                #region 是否需要在执行成功的清空下发送邮件
-
-                SendInfoEmail(dt,Fun, Fun + "-LoadData", "執行成功", AliResult);
-
-                #endregion
-
-                //执行完成后，从List中删除,便于执行第二次方法。
-                PassValue.TimeProjectJob.Remove(Fun);
             }
             catch (Exception ex)
             {
-                EventLog.WriteEntry("我正在执行LoadData_" + Fun + "_Time,出现问题：" + ex.Message + "!");//在系统事件查看器里的应用程序事件里来源的描述
-                WiterLog(Fun, "我正在执行LoadData_" + Fun + "_Time,出现问题：" + ex.Message + "!");
-                WiterLog(Fun, "我正在执行LoadData_" + Fun + "_Time,出现问题：" + ex.ToString() + "!");
-
-                //执行完成后，从List中删除,便于执行第二次方法。
-                PassValue.TimeProjectJob.Remove(Fun);
-
-                //發送郵件
-                SendActionEmail(null, Fun, Fun + "-LoadData", ex.Message, ex.ToString());
+                TryWriteEventLog(fun + " 调度出现问题：" + ex.Message);
+                WiterLog(fun, "调度出现问题：" + ex);
+                SendActionEmail(null, fun, fun + "-Time", ex.Message, ex.ToString());
             }
         }
 
-        #endregion
-
-        #region  顺序执行（API+存储过程）
-        //开始执行异步方法
-        public async void APISequence(string Fun)
+        //按时间间隔调度
+        private void ScheduleByInterval(string fun, JobKind kind, DataTable dt, DateTime now)
         {
-            await Task.Run(() =>
+            string intervals = GetField(dt, "IntervalsTime");
+            double intervalSeconds;
+            if (string.IsNullOrWhiteSpace(intervals)
+                || !double.TryParse(intervals, NumberStyles.Any, CultureInfo.InvariantCulture, out intervalSeconds)
+                || intervalSeconds <= 0)
+            {
+                ConfigAlert(dt, fun, fun + "-Time", fun + "_Setup.xml中IntervalsTime配置错误,无法执行。请按照说明调整(时间间隔 单位:秒,必须为正数)。");
+                return;
+            }
+
+            DateTime lastRun;
+            if (!PassValue.TryGetLastRunTime(fun, out lastRun))
+            {
+                QueueExecution(fun, kind, dt, "时间间隔,第一次执行");
+                return;
+            }
+
+            //上次执行完成时间+间隔 已到,触发执行(执行中会被执行锁挡住,不会并发)
+            if (lastRun.AddSeconds(intervalSeconds) <= now)
+            {
+                QueueExecution(fun, kind, dt, "时间间隔执行");
+            }
+        }
+
+        //按周期调度(EveryDay/EveryWeek)
+        private void ScheduleByCycle(string fun, JobKind kind, DataTable dt, DateTime now)
+        {
+            string cycleType = GetField(dt, "CycltType");
+
+            if (cycleType.Equals("everyweek", StringComparison.OrdinalIgnoreCase))
+            {
+                string dayOfWeekStr = GetField(dt, "DayOfWeek");
+                DayOfWeek dayOfWeek;
+                if (!Enum.TryParse(dayOfWeekStr, true, out dayOfWeek))
+                {
+                    ConfigAlert(dt, fun, fun + "-Time", fun + "_Setup.xml中DayOfWeek配置错误(应为Monday~Sunday的英文),当前值：" + dayOfWeekStr);
+                    return;
+                }
+                if (dayOfWeek != now.DayOfWeek) return;
+            }
+            else if (!cycleType.Equals("everyday", StringComparison.OrdinalIgnoreCase))
+            {
+                ConfigAlert(dt, fun, fun + "-Time", fun + "_Setup.xml中CycltType配置错误,无法执行。请按照说明调整(周期选择:EveryDay EveryWeek)。");
+                return;
+            }
+
+            string specificTime = GetField(dt, "SpecificTime");
+            TimeSpan timeOfDay;
+            if (!TryParseTimeOfDay(specificTime, out timeOfDay))
+            {
+                ConfigAlert(dt, fun, fun + "-Time", fun + "_Setup.xml中SpecificTime配置错误(应为HH:mm,24小时制),当前值：" + specificTime);
+                return;
+            }
+
+            //到达执行分钟,原子地抢占"今天只执行一次"
+            if (now.Hour == timeOfDay.Hours && now.Minute == timeOfDay.Minutes)
+            {
+                if (PassValue.MarkExecutedToday(fun))
+                {
+                    QueueExecution(fun, kind, dt, "周期执行");
+                }
+            }
+        }
+
+        //把真正的执行工作放到线程池,调度线程不被阻塞;执行锁保证同一任务不会并发执行
+        private void QueueExecution(string fun, JobKind kind, DataTable dt, string info)
+        {
+            Task.Run(() =>
             {
                 try
                 {
-
-                    //创建一个定时器
-                    System.Timers.Timer TimerProject;  //计时器
-
-                    //初始化
-                    TimerProject = new System.Timers.Timer();
-                    //设定定时时间  最小单位是1秒
-                    TimerProject.Interval = 1000;  //设置计时器事件间隔执行时间
-
-                    //设置定时执行方法  到达时间的时候执行事件； 
-                    //TimerProject.Elapsed += new System.Timers.ElapsedEventHandler(TimerProject_Elapsed);
-                    TimerProject.Elapsed += new System.Timers.ElapsedEventHandler((o, e) => TimerProjectAPISequence_Elapsed(o, e, Fun, TimerProject));
-
-                    TimerProject.AutoReset = true;//设置是执行一次（false）还是一直执行(true)； 
-                                                  //打开Timer执行
-                    TimerProject.Enabled = true; //是否执行System.Timers.Timer.Elapsed事件；
+                    switch (kind)
+                    {
+                        case JobKind.Api:
+                            ApiInfoLoadData(fun, dt, info);
+                            break;
+                        case JobKind.Sequence:
+                            APISequenceLoadData(fun, dt, info);
+                            break;
+                        case JobKind.StoredProcedure:
+                            SPInfoLoadData(fun, dt, info);
+                            break;
+                    }
                 }
                 catch (Exception ex)
                 {
-                    EventLog.WriteEntry("我正在执行" + Fun + ",出现问题：" + ex.Message + "!");//在系统事件查看器里的应用程序事件里来源的描述
-                    WiterLog(Fun, "我正在执行" + Fun + ",出现问题：" + ex.Message + "!");
-                    WiterLog(Fun, "我正在执行" + Fun + ",出现问题：" + ex.ToString());
-
-                    //执行出现问题,发邮件给管理员
-                    //[ACTION] -XXXX
-                    SendActionEmail(null, Fun, Fun + "-APISequence", ex.Message, ex.ToString());
+                    WiterLog(fun, "执行出现未捕获异常：" + ex);
+                    JobHistory.Record(fun, info, 0, "失败", ex.Message);
+                    SendActionEmail(dt, fun, fun + "-LoadData", ex.Message, ex.ToString());
+                    PassValue.UnlockJob(fun);
                 }
             });
         }
 
-        //定时程序执行方法
-        private void TimerProjectAPISequence_Elapsed(object sender, System.Timers.ElapsedEventArgs e, string Fun, System.Timers.Timer TimerProject)
+        #endregion
+
+        #region 执行器
+
+        /// <summary>Type=0 调用单个API</summary>
+        private void ApiInfoLoadData(string fun, DataTable dt, string info)
         {
-            //記錄方法配置
-            DataTable dt = new DataTable();
-            try
+            if (!PassValue.LockJob(fun))
             {
-                //判断程序是否还需要执行
-                //不存在与程序执行List中,停止运行程序
-                if (!PassValue.TimeProject.Contains(Fun))
-                {
-                    WiterLog(Fun, "停止运行APISequence" + Fun + "-Time!");
-
-                    //将标注每个Fun准确的执行时间中的数据清除，便于下次执行
-                    PassValue.ExecutionStatusByTime.Remove(Fun);
-
-                    //将今天已经执行过的周期记录也清除掉，便于下次执行
-                    PassValue.ExecutionStatus.Remove(Fun);
-
-                    //清除执行锁定程序 便于下次执行
-                    PassValue.TimeProjectJob.Remove(Fun);
-
-                    TimerProject.Enabled = false;
-                    return;
-                }
-
-                //WiterLog(Fun, "我正在执行APISequence" + Fun + "-Time!");
-
-
-                //获取配置文件根目录
-                string basePath = File.LocalConfig();
-
-                //拼接System应该存在的配置文件路径
-                string ConfigPath = Path.Combine(basePath, Fun);
-
-                //检查目录是否存在,不存在则创建
-                if (File.DirectoryIsExist(ConfigPath))
-                {
-                    //获取Xml配置的信息
-                    dt = File.GetXmlInfo(ConfigPath, Fun + "_Setup.xml");
-                    //判断是否有数据
-                    if (dt != null && dt.Rows.Count > 0)
-                    {
-                        DateTime NowTime = DateTime.Now;
-                        //无论有多少行，只取第一行
-                        //开始时间 <!--开始时间 yyyy-MM-dd HH:mm  24小时制 没有则留空 与结束时间无需成对-->
-                        string StartTime = dt.Rows[0]["StartTime"].ToString().Trim();
-                        if (!string.IsNullOrWhiteSpace(StartTime))
-                        {
-                            //判断是否到达约定时间  当前时间小于等于开始时间的时候 直接结束
-                            if (NowTime < Convert.ToDateTime(StartTime))
-                            {
-                                WiterLog(Fun, Fun + "-Time,当前时间：" + NowTime.ToString() + "还没有到达开始时间：" + StartTime + ",不能开始执行程序");
-                                return;
-                            }
-                        }
-
-                        //结束时间 <!--结束时间 yyyy-MM-dd  HH:mm 24小时制 没有则留空 与开始时间无需成对--->
-                        string EndTime = dt.Rows[0]["EndTime"].ToString().Trim();
-                        if (!string.IsNullOrWhiteSpace(EndTime))
-                        {
-                            //判断是否到达约定时间  当前时间大于结束时间的时候 直接结束
-                            if (NowTime > Convert.ToDateTime(EndTime))
-                            {
-                                WiterLog(Fun, Fun + "-Time,当前时间：" + NowTime.ToString() + "已经超过结束时间：" + EndTime + ",不能开始执行程序");
-                                return;
-                            }
-                        }
-
-                        //判断执行类型 <!--执行类型 0:按时间间隔 1:按周期-->
-                        string ExecutionStatus = dt.Rows[0]["ExecutionStatus"].ToString().Trim();
-                        if (ExecutionStatus == "0")//0:按时间间隔
-                        {
-                            //获取时间间隔
-                            string IntervalsTime = dt.Rows[0]["IntervalsTime"].ToString().Trim();
-                            if (IntervalsTime == "")
-                            {
-                                WiterLog(Fun, Fun + "_Setup.xml中IntervalsTime配置错误,无法执行。请按照说明调整(时间间隔 单位:秒)。");
-
-                                SendActionEmail(dt, Fun, Fun + "-Time", "配置错误", Fun + "_Setup.xml中IntervalsTime配置错误,无法执行。请按照说明调整(时间间隔 单位:秒)。");
-
-                                return;
-                            }
-                            else
-                            {
-                                //判断是第一次进方法就给全局时间赋当前时间
-                                if (!PassValue.ExecutionStatusByTime.ContainsKey(Fun))
-                                {
-                                    //添加准确执行时间到数组上
-                                    PassValue.ExecutionStatusByTime.Add(Fun, DateTime.Now);
-
-                                    //执行 全局时间赋值在主程序里面
-                                    APISequenceLoadData(Fun, dt);
-                                    return;
-                                }
-                                else
-                                {
-                                    DateTime Time = PassValue.ExecutionStatusByTime[Fun];
-                                    //设置时间相等时 执行不进去,设置时间小于 执行一次 并马上赋值Time为目前时间
-                                    if (Time.AddSeconds(double.Parse(IntervalsTime)) <= DateTime.Now)
-                                    {
-                                        //执行
-                                        APISequenceLoadData(Fun, dt);
-                                        return;
-                                    }
-                                }
-                            }
-                        }
-                        else if (ExecutionStatus == "1")//1:按周期
-                        {
-                            //周期选择 ： EveryDay EveryWeek
-                            string CycltType = dt.Rows[0]["CycltType"].ToString().Trim();
-
-                            //分析周期
-                            if (CycltType.ToLower() == "everyweek")
-                            {
-                                //星期几 ： Monday  Tuesday Wednesday Thursday  Friday  Saturday  Sunday
-                                string DayOfWeek = dt.Rows[0]["DayOfWeek"].ToString().Trim();
-                                //判断星期几是否符合
-                                if (DayOfWeek.ToLower() == DateTime.Today.DayOfWeek.ToString().ToLower())
-                                {
-                                    //获取 特定时间：HH:mm 24小时制 不包含秒
-                                    string SpecificTime = dt.Rows[0]["SpecificTime"].ToString().Trim();
-                                    //去掉秒,执行准确
-                                    if (Convert.ToInt32(Convert.ToDateTime(SpecificTime).ToString("HHmm")) == Convert.ToInt32(DateTime.Now.ToString("HHmm")))
-                                    {
-                                        //今天是否有执行过,未执行过才能执行，否则这一分钟会执行60次
-                                        if (!PassValue.ExecutionStatus.Contains(Fun))
-                                        {
-                                            //将当前执行方法添加到List中,每天晚上00:00 清空这个List
-                                            PassValue.ExecutionStatus.Add(Fun);
-                                            //执行方法
-                                            APISequenceLoadData(Fun, dt);
-                                            return;
-                                        }
-                                    }
-                                }
-                            }
-                            else if (CycltType.ToLower() == "everyday")
-                            {
-                                //获取 特定时间：HH:mm 24小时制 不包含秒
-                                string SpecificTime = dt.Rows[0]["SpecificTime"].ToString().Trim();
-                                //去掉秒,执行准确
-                                if (Convert.ToInt32(Convert.ToDateTime(SpecificTime).ToString("HHmm")) == Convert.ToInt32(DateTime.Now.ToString("HHmm")))
-                                {
-                                    //今天是否有执行过,未执行过才能执行，否则这一分钟会执行60次
-                                    if (!PassValue.ExecutionStatus.Contains(Fun))
-                                    {
-                                        //将当前执行方法添加到List中,每天晚上00:00 清空这个List
-                                        PassValue.ExecutionStatus.Add(Fun);
-                                        //执行方法
-                                        APISequenceLoadData(Fun, dt);
-                                        return;
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                WiterLog(Fun, "我正在执行APISequence_" + Fun + "_Time,配置文件：CycltType 配置错误,请按照说明调整（周期选择 ： EveryDay EveryWeek）!");
-
-                                SendActionEmail(dt, Fun, Fun + "-Time", "配置错误", Fun + "_Setup.xml中CycltType配置错误,无法执行。请按照说明调整(周期选择:EveryDay EveryWeek)。");
-                            }
-                        }
-                        else
-                        {
-                            WiterLog(Fun, "我正在执行APISequence_" + Fun + "_Time,配置文件：ExecutionStatus 配置错误,请按照说明调整（执行类型 0:按时间间隔 1:按周期）!");
-
-                            SendActionEmail(dt, Fun, Fun + "-Time", "配置错误", Fun + "_Setup.xml中ExecutionStatus配置错误,无法执行。请按照说明调整(执行类型 0:按时间间隔 1:按周期)。");
-                            return;
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                EventLog.WriteEntry("我正在执行APISequence_" + Fun + "_Time,出现问题：" + ex.Message + "!");//在系统事件查看器里的应用程序事件里来源的描述
-                WiterLog(Fun, "我正在执行APISequence_" + Fun + "_Time,出现问题：" + ex.Message + "!");
-                WiterLog(Fun, "我正在执行APISequence_" + Fun + "_Time,出现问题：" + ex.ToString());
-
-                //执行出现问题,发邮件给管理员
-                //[ACTION] -XXXX
-                SendActionEmail(dt, Fun, Fun + "-Time", ex.Message, ex.ToString());
-            }
-        }
-
-        /// <summary>
-        /// 顺序执行时候的主程序
-        /// </summary>
-        /// <param name="Time">接受传入的时间,返回赋值之后的时间 ref不赋值也行</param>
-        /// <param name="Fun">方法名称</param>
-        public void APISequenceLoadData(string Fun, DataTable dt)
-        {
-            //判断当前方法是否在运行 还在运行则不允许继续执行
-            if (PassValue.TimeProjectJob.Contains(Fun))
-            {
-                WiterLog(Fun, "程序还未处理完成，锁定执行");
+                WiterLog(fun, "程序还未处理完成，锁定执行");
                 return;
             }
 
-            //当前时间赋值给全局时间 方便下次循环
-            //判断是否存在数据在全局变量里面
-            if (PassValue.ExecutionStatusByTime.ContainsKey(Fun))
-            {
-                //PassValue.ExecutionStatusByTime.Remove(Fun);
-                //存在,修改
-                PassValue.ExecutionStatusByTime[Fun] = DateTime.Now;
-            }
-            else
-            {
-                //不存在添加
-                PassValue.ExecutionStatusByTime.Add(Fun, DateTime.Now);
-            }
-
-            //将当前方法写入List  避免重复执行
-            PassValue.TimeProjectJob.Add(Fun);
-
-            WiterLog(Fun, "程序开始执行!");
+            Stopwatch sw = Stopwatch.StartNew();
             try
             {
-
-                string AliResult = "";
-
-                //获取配置文件根目录
-                string basePath = File.LocalConfig();
-
-                //拼接System应该存在的配置文件路径  打开指定的项目的文件夹
-                string ConfigPath = Path.Combine(basePath , Fun);
-
-                //检查目录是否存在,不存在则创建
-                if (File.DirectoryIsExist(ConfigPath))
+                string apiUrl = GetField(dt, "ApiUrl");
+                if (string.IsNullOrWhiteSpace(apiUrl))
                 {
-                    //获取Xml配置的信息
-                    DataTable SequenceDT = File.GetXmlInfo(ConfigPath, Fun + "_Sequence.xml");
-                    //判断是否有数据
-                    if (SequenceDT != null && SequenceDT.Rows.Count > 0)
-                    {
-                        for (int i = 0; i < SequenceDT.Rows.Count; i++)
-                        {
-                            string res = "";
-                            WiterLog(Fun, "开始循环");
-                            WiterLog(Fun, "执行第" + (i + 1) + "个" + SequenceDT.Rows[i][0].ToString() + " ：" + SequenceDT.Rows[i][1].ToString());
-                            if (SequenceDT.Rows[i][0].ToString() == "存储过程")
-                            {
-                                string ConnStr = dt.Rows[0]["ConnStr"].ToString().Trim();
-                                if (string.IsNullOrWhiteSpace(ConnStr))
-                                {
-                                   
-                                    WiterLog(Fun, "我正在执行APISequence_" + Fun + "_Time," + Fun + "_Sequence.xml中ConnStr配置错误,无法执行。请按照说明调整(数据库链接字符串  Server = xxxx.xxx.xx; Database = Test; User ID = sa; Password = 123;)。");
-
-                                    SendActionEmail(dt, Fun, Fun + "-APISequence", "配置错误", Fun + "_Sequence.xml中ConnStr配置错误,无法执行。请按照说明调整(数据库链接字符串  Server=xxxx.xxx.xx;Database=Test;User ID=sa;Password=123;)。");
-
-                                    //执行完成后，从List中删除,便于执行第二次方法。
-                                    PassValue.TimeProjectJob.Remove(Fun);
-
-                                    return;
-                                }
-
-                                //写入参数
-                                DataTable dtSql = SQLHelper.ExecuteDataTable(ConnStr, CommandType.StoredProcedure, SequenceDT.Rows[i][1].ToString(), null);
-                                if (dtSql != null && dtSql.Rows.Count > 0)
-                                {
-                                    res += dtSql.Rows[0][0].ToString();
-                                }
-                            }
-                            else if (SequenceDT.Rows[i][0].ToString() == "API地址")
-                            {
-                  
-
-                                //获取是否需要安全验证，是则必须填写验证密钥
-                                string Verification = dt.Rows[0]["Verification"].ToString().Trim();
-                                string AuthenticationKey = dt.Rows[0]["AuthenticationKey"].ToString().Trim();
-                                string ApiUrl = SequenceDT.Rows[i][1].ToString().Trim();
-
-                                if (string.IsNullOrWhiteSpace(ApiUrl))
-                                {
-                                    WiterLog(Fun, Fun + "_Setup.xml中ApiUrl配置错误,无法执行。请按照说明调整(Api 请求地址)。");
-
-                                    SendActionEmail(dt, Fun, Fun + "-APISequence", "配置错误", Fun + "_Sequence.xml中ApiUrl配置错误,无法执行。请按照说明调整(Api 请求地址)。");
-                                    return;
-                                }
-
-                                if (Verification.ToLower() == "true")
-                                {
-                                    if (AuthenticationKey == "")
-                                    {
-                                        WiterLog(Fun, "我正在执行APISequence_" + Fun + "_Time,配置文件：AuthenticationKey 配置错误,请按照说明调整（请求安全验证之密钥）!");
-
-                                        SendActionEmail(dt, Fun, Fun + "-APISequence", "配置错误", Fun + "_Sequence.xml中AuthenticationKey配置错误,无法执行。请按照说明调整(请求安全验证之密钥)。");
-
-                                        //执行完成后，从List中删除,便于执行第二次方法。
-                                        PassValue.TimeProjectJob.Remove(Fun);
-
-                                        return;
-                                    }
-                                    else
-                                    {
-                                        //拼接新的Url
-                                        string time = LocalFile.GetTimeStampByMilliseconds();
-                                        ApiUrl += "?Timestamp=" + time + "&SyncKey=" + LocalFile.GetSha1(AuthenticationKey + time);
-                                    }
-                                }
-
-                                res = HttpRequest.HttpGet(ApiUrl, "", 2 * 60 * 60 * 1000);//设置2个小时的超时时间
-                            }
-                            AliResult += "序号：" + (i + 1) + SequenceDT.Rows[i][0].ToString() + ":" + SequenceDT.Rows[i][1].ToString() + "；返回数据：" + res;
-
-                            WiterLog(Fun, "序号：" + (i + 1) + SequenceDT.Rows[i][0].ToString() + ":" + SequenceDT.Rows[i][1].ToString() + "；返回数据：" + res);
-                        }
-                    }
+                    ConfigAlert(dt, fun, fun + "-ApiInfo", fun + "_Setup.xml中ApiUrl配置错误,无法执行。请按照说明调整(Api 请求地址)。");
+                    return;
                 }
 
-                //WiterLog(Fun, "返回数据：" + AliResult);
+                string url;
+                if (!TryBuildSignedUrl(dt, apiUrl, out url))
+                {
+                    ConfigAlert(dt, fun, fun + "-ApiInfo", fun + "_Setup.xml中AuthenticationKey配置错误,无法执行。请按照说明调整(请求安全验证之密钥)。");
+                    return;
+                }
 
+                int retryCount, retryInterval;
+                GetRetryConfig(dt, out retryCount, out retryInterval);
+                int timeoutMs = GetHttpTimeoutMs(dt);
 
-                #region 是否需要在执行成功的情况下发送邮件
-                SendInfoEmail(dt, Fun, Fun + "-LoadData", "執行成功", AliResult);
-                #endregion
+                WiterLog(fun, info + ",程序开始执行!");
+                string result = ExecuteWithRetry(fun, () => HttpRequest.HttpGet(url, "", timeoutMs), retryCount, retryInterval);
+                sw.Stop();
 
-                //执行完成后，从List中删除,便于执行第二次方法。
-                PassValue.TimeProjectJob.Remove(Fun);
+                WiterLog(fun, "返回数据：" + LocalFile.Truncate(result, 4000));
+                JobHistory.Record(fun, info, sw.Elapsed.TotalSeconds, "成功", result);
+                SendInfoEmail(dt, fun, fun + "-LoadData", "執行成功", LocalFile.Truncate(result, 2000));
             }
             catch (Exception ex)
             {
-                WiterLog(Fun, "发生错误：" + ex.Message);
-                WiterLog(Fun, "发生错误：" + ex.ToString());
-
-                //發送郵件
-                SendActionEmail(null, Fun, Fun + "-LoadData", ex.Message, ex.ToString());
-
-                //执行完成后，从List中删除,便于执行第二次方法。
-                PassValue.TimeProjectJob.Remove(Fun);
+                sw.Stop();
+                TryWriteEventLog(fun + " LoadData出现问题：" + ex.Message);
+                WiterLog(fun, "执行出现问题：" + ex);
+                JobHistory.Record(fun, info, sw.Elapsed.TotalSeconds, "失败", ex.Message);
+                SendActionEmail(dt, fun, fun + "-LoadData", ex.Message, ex.ToString());
+            }
+            finally
+            {
+                //执行完成(无论成败)才解锁并刷新计时基准,避免失败后立即重试风暴
+                PassValue.SetLastRunTime(fun, DateTime.Now);
+                PassValue.UnlockJob(fun);
             }
         }
+
+        /// <summary>Type=1 顺序执行(API+存储过程),任一步失败立即中断后续步骤</summary>
+        private void APISequenceLoadData(string fun, DataTable dt, string info)
+        {
+            if (!PassValue.LockJob(fun))
+            {
+                WiterLog(fun, "程序还未处理完成，锁定执行");
+                return;
+            }
+
+            Stopwatch sw = Stopwatch.StartNew();
+            try
+            {
+                string configPath = Path.Combine(localFile.LocalConfig(), fun);
+                DataTable sequenceDT = localFile.GetXmlInfo(configPath, fun + "_Sequence.xml");
+                if (sequenceDT == null || sequenceDT.Rows.Count == 0)
+                {
+                    ConfigAlert(dt, fun, fun + "-APISequence", fun + "_Sequence.xml不存在或没有配置步骤,无法执行。");
+                    return;
+                }
+
+                int retryCount, retryInterval;
+                GetRetryConfig(dt, out retryCount, out retryInterval);
+                int timeoutMs = GetHttpTimeoutMs(dt);
+
+                WiterLog(fun, info + ",程序开始执行!");
+                StringBuilder aliResult = new StringBuilder();
+
+                for (int i = 0; i < sequenceDT.Rows.Count; i++)
+                {
+                    string stepType = sequenceDT.Rows[i][0].ToString().Trim();
+                    string stepInfo = sequenceDT.Rows[i][1].ToString().Trim();
+                    WiterLog(fun, "执行第" + (i + 1) + "个" + stepType + "：" + stepInfo);
+
+                    string res;
+                    if (stepType == "存储过程")
+                    {
+                        string connStr = GetField(dt, "ConnStr");
+                        if (string.IsNullOrWhiteSpace(connStr))
+                        {
+                            ConfigAlert(dt, fun, fun + "-APISequence", "第" + (i + 1) + "步为存储过程,但" + fun + "_Setup.xml中ConnStr为空,无法执行。请按照说明调整(数据库链接字符串)。");
+                            return;
+                        }
+
+                        string spName = stepInfo;
+                        DataTable dtSql = ExecuteWithRetry(fun, () => SQLHelper.ExecuteDataTable(connStr, CommandType.StoredProcedure, spName, null), retryCount, retryInterval);
+                        res = (dtSql != null && dtSql.Rows.Count > 0) ? dtSql.Rows[0][0].ToString() : "(无返回数据)";
+                    }
+                    else if (stepType == "API地址")
+                    {
+                        if (string.IsNullOrWhiteSpace(stepInfo))
+                        {
+                            ConfigAlert(dt, fun, fun + "-APISequence", "第" + (i + 1) + "步API地址为空,无法执行。请调整" + fun + "_Sequence.xml。");
+                            return;
+                        }
+
+                        string url;
+                        if (!TryBuildSignedUrl(dt, stepInfo, out url))
+                        {
+                            ConfigAlert(dt, fun, fun + "-APISequence", "第" + (i + 1) + "步启用了安全验证,但" + fun + "_Setup.xml中AuthenticationKey为空,无法执行。");
+                            return;
+                        }
+
+                        res = ExecuteWithRetry(fun, () => HttpRequest.HttpGet(url, "", timeoutMs), retryCount, retryInterval);
+                    }
+                    else
+                    {
+                        ConfigAlert(dt, fun, fun + "-APISequence", "第" + (i + 1) + "步类型[" + stepType + "]不支持(仅支持:API地址/存储过程),顺序执行已中断。");
+                        return;
+                    }
+
+                    string stepResult = "序号：" + (i + 1) + " " + stepType + ":" + stepInfo + "；返回数据：" + LocalFile.Truncate(res, 500);
+                    aliResult.AppendLine(stepResult);
+                    WiterLog(fun, stepResult);
+                }
+
+                sw.Stop();
+                string resultText = aliResult.ToString();
+                JobHistory.Record(fun, info, sw.Elapsed.TotalSeconds, "成功", resultText);
+                SendInfoEmail(dt, fun, fun + "-LoadData", "執行成功", LocalFile.Truncate(resultText, 2000));
+            }
+            catch (Exception ex)
+            {
+                sw.Stop();
+                WiterLog(fun, "发生错误：" + ex);
+                JobHistory.Record(fun, info, sw.Elapsed.TotalSeconds, "失败", ex.Message);
+                SendActionEmail(dt, fun, fun + "-LoadData", ex.Message, ex.ToString());
+            }
+            finally
+            {
+                PassValue.SetLastRunTime(fun, DateTime.Now);
+                PassValue.UnlockJob(fun);
+            }
+        }
+
+        /// <summary>Type=2 独立执行存储过程</summary>
+        private void SPInfoLoadData(string fun, DataTable dt, string info)
+        {
+            if (!PassValue.LockJob(fun))
+            {
+                WiterLog(fun, "程序还未处理完成，锁定执行");
+                return;
+            }
+
+            Stopwatch sw = Stopwatch.StartNew();
+            try
+            {
+                string connStr = GetField(dt, "ConnStr");
+                if (string.IsNullOrWhiteSpace(connStr))
+                {
+                    ConfigAlert(dt, fun, fun + "-SP", fun + "_Setup.xml中ConnStr配置错误,无法执行。请按照说明调整(数据库链接字符串)。");
+                    return;
+                }
+
+                string spName = GetField(dt, "StoredProcedure");
+                if (string.IsNullOrWhiteSpace(spName))
+                {
+                    ConfigAlert(dt, fun, fun + "-SP", fun + "_Setup.xml中StoredProcedure未配置,无法执行。请填写存储过程名称。");
+                    return;
+                }
+
+                int retryCount, retryInterval;
+                GetRetryConfig(dt, out retryCount, out retryInterval);
+
+                WiterLog(fun, info + ",程序开始执行存储过程：" + spName);
+                DataTable dtSql = ExecuteWithRetry(fun, () => SQLHelper.ExecuteDataTable(connStr, CommandType.StoredProcedure, spName, null), retryCount, retryInterval);
+                sw.Stop();
+
+                string res = (dtSql != null && dtSql.Rows.Count > 0) ? dtSql.Rows[0][0].ToString() : "(无返回数据)";
+                WiterLog(fun, "返回数据：" + LocalFile.Truncate(res, 4000));
+                JobHistory.Record(fun, info, sw.Elapsed.TotalSeconds, "成功", res);
+                SendInfoEmail(dt, fun, fun + "-LoadData", "執行成功", LocalFile.Truncate(res, 2000));
+            }
+            catch (Exception ex)
+            {
+                sw.Stop();
+                WiterLog(fun, "发生错误：" + ex);
+                JobHistory.Record(fun, info, sw.Elapsed.TotalSeconds, "失败", ex.Message);
+                SendActionEmail(dt, fun, fun + "-LoadData", ex.Message, ex.ToString());
+            }
+            finally
+            {
+                PassValue.SetLastRunTime(fun, DateTime.Now);
+                PassValue.UnlockJob(fun);
+            }
+        }
+
         #endregion
 
-        #region  执行存储过程
-        //Stored procedure
+        #region 重试与配置辅助
+
+        /// <summary>带重试的执行;全部重试失败才向上抛异常</summary>
+        private T ExecuteWithRetry<T>(string fun, Func<T> action, int retryCount, int retryIntervalSeconds)
+        {
+            int attempt = 0;
+            while (true)
+            {
+                try
+                {
+                    return action();
+                }
+                catch (Exception ex)
+                {
+                    attempt++;
+                    if (attempt > retryCount) throw;
+                    WiterLog(fun, "第" + attempt + "次执行失败：" + ex.Message + "，" + retryIntervalSeconds + "秒后重试");
+                    Thread.Sleep(retryIntervalSeconds * 1000);
+                }
+            }
+        }
+
+        //读取可选的重试配置 RetryCount(默认0=不重试) / RetryInterval(秒,默认60)
+        private static void GetRetryConfig(DataTable dt, out int retryCount, out int retryIntervalSeconds)
+        {
+            retryCount = 0;
+            retryIntervalSeconds = 60;
+            int.TryParse(GetField(dt, "RetryCount"), NumberStyles.Integer, CultureInfo.InvariantCulture, out retryCount);
+            int.TryParse(GetField(dt, "RetryInterval"), NumberStyles.Integer, CultureInfo.InvariantCulture, out retryIntervalSeconds);
+            if (retryCount < 0) retryCount = 0;
+            if (retryCount > 10) retryCount = 10;
+            if (retryIntervalSeconds < 1) retryIntervalSeconds = 60;
+        }
+
+        //读取可选的HTTP超时配置 HttpTimeout(秒),缺省10分钟
+        private static int GetHttpTimeoutMs(DataTable dt)
+        {
+            int seconds;
+            if (int.TryParse(GetField(dt, "HttpTimeout"), NumberStyles.Integer, CultureInfo.InvariantCulture, out seconds) && seconds > 0)
+            {
+                return seconds * 1000;
+            }
+            return DefaultHttpTimeoutMs;
+        }
+
+        /// <summary>按配置追加签名参数;启用验证但密钥为空时返回false</summary>
+        private static bool TryBuildSignedUrl(DataTable dt, string apiUrl, out string url)
+        {
+            url = apiUrl;
+            string verification = GetField(dt, "Verification");
+            if (!verification.Equals("true", StringComparison.OrdinalIgnoreCase)) return true;
+
+            string key = GetField(dt, "AuthenticationKey");
+            if (key == "") return false;
+
+            string time = LocalFile.GetTimeStampByMilliseconds();
+            string sep = apiUrl.Contains("?") ? "&" : "?";
+            url = apiUrl + sep + "Timestamp=" + time + "&SyncKey=" + LocalFile.GetSha1(key + time);
+            return true;
+        }
+
+        //配置错误:写日志+发告警邮件(告警邮件在SendActionEmail内统一节流)
+        private void ConfigAlert(DataTable dt, string fun, string funDetails, string message)
+        {
+            WiterLog(fun, message);
+            SendActionEmail(dt, fun, funDetails, "配置错误", message);
+        }
+
+        private static bool TryParseDateTime(string value, out DateTime result)
+        {
+            return DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out result);
+        }
+
+        private static bool TryParseTimeOfDay(string value, out TimeSpan result)
+        {
+            result = TimeSpan.Zero;
+            if (string.IsNullOrWhiteSpace(value)) return false;
+
+            DateTime parsed;
+            if (DateTime.TryParseExact(value.Trim(), new[] { "HH:mm", "H:mm", "HH:mm:ss" }, CultureInfo.InvariantCulture, DateTimeStyles.None, out parsed))
+            {
+                result = parsed.TimeOfDay;
+                return true;
+            }
+            return false;
+        }
+
+        //安全读取配置字段:列不存在或值为空时返回""而不是抛异常
+        private static string GetField(DataTable dt, string name)
+        {
+            return GetRowField(dt, 0, name);
+        }
+
+        private static string GetRowField(DataTable dt, int rowIndex, string name)
+        {
+            if (dt == null || rowIndex >= dt.Rows.Count) return "";
+            if (!dt.Columns.Contains(name)) return "";
+            object value = dt.Rows[rowIndex][name];
+            return value == null || value == DBNull.Value ? "" : value.ToString().Trim();
+        }
+
         #endregion
 
+        #region 写入日志
 
-        private static object o = new object();
+        private static readonly object LogLock = new object();
 
-        #region 写入日志  最好异步写,避免线程阻塞
-        /// <summary>
-        /// 写入日志  最好异步写,避免线程阻塞
-        /// </summary>
-        /// <param name="Fun">方法名</param>
-        /// <param name="Info">写入消息</param>
+        /// <summary>写入日志(线程池异步写,避免阻塞主流程)</summary>
         public void WiterLog(string Fun, string Info)
         {
-            //await Task.Run(() =>
-            //{
             try
             {
-                //写入日志信息表 用文件夹分组
-                string fileName = DateTime.Now.ToString("yyyyMMdd") + @".log";
+                string fileName = DateTime.Now.ToString("yyyyMMdd") + ".log";
+                string basePath = localFile.LocalLog();
+                string logPath = Path.Combine(Path.Combine(basePath, Fun), DateTime.Now.ToString("yyyyMM"));
+                Directory.CreateDirectory(logPath);
+                string filePath = Path.Combine(logPath, fileName);
 
-                //创建目录
-                string basePath = File.LocalLog();
-
-                //按月份分组日志
-                string LogPath = Path.Combine(Path.Combine(basePath, Fun), DateTime.Now.ToString("yyyyMM"));
-
-                //检查目录是否存在,不存在则创建
-                if (File.DirectoryIsExist(LogPath))
+                string log = "[" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "]       " + Info + "\r\n";
+                ThreadPool.QueueUserWorkItem(_ =>
                 {
-                    //文件与文件名组合在一起
-                    string FilePath = Path.Combine(LogPath, fileName);
-
-                    //EventLog.WriteEntry("地址：" + FilePath);//在系统事件查看器里的应用程序事件里来源的描述
-
-
-                    //先写好需要写到日志文件中的数据
-                    string log = "[" + DateTime.Now.ToString() + "]       " + Info + "\r\n";
-                    ThreadPool.QueueUserWorkItem(new WaitCallback(obj =>//线程池，在有线程池线程变得可用时执行
+                    lock (LogLock)
                     {
-                        lock (o)
+                        try
                         {
-                            //判断文件是否已经存在.
-                            if (File.FileIsExist(FilePath))
-                            {
-                                using (var sw = new StreamWriter(FilePath, true))
-                                {
-                                    var sb = new StringBuilder();
-                                    sb.Append(log);
-                                    //sb.AppendLine(Environment.NewLine);
-                                    sw.Write(sb.ToString());
-                                }
-                            }
+                            System.IO.File.AppendAllText(filePath, log);
                         }
-                    }));
-
-                    ////判断文件是否已经存在.
-                    //if (File.FileIsExist(FilePath))
-                    //{
-                    //   System.IO.File.AppendAllText(FilePath, "[" + DateTime.Now.ToString() + "]       " + Info + "\r\n");
-
-                    //    //FileInfo FI = new FileInfo(FilePath);
-                    //    //StreamWriter SW = FI.AppendText();
-                    //    //SW.WriteLine("[" + DateTime.Now.ToString() + "]       " + Info);
-                    //    ////SW.Write("[" + DateTime.Now.ToString() + "]       " + Info + "\r\n");
-                    //    //SW.Flush();
-                    //    //SW.Close();
-
-                    //    ////关闭后，需要手动清理一下资源
-                    //    //SW.Dispose();
-                    //    //SW = null;
-                    //}
-                }
+                        catch
+                        {
+                            //单次写入失败忽略,避免影响主流程
+                        }
+                    }
+                });
             }
             catch (Exception ex)
             {
-                EventLog.WriteEntry("我正在执行WiterLog_" + Fun + ",出现问题：" + ex.Message + "!");//在系统事件查看器里的应用程序事件里来源的描述
-                WiterLog(Fun, "我正在执行WiterLog_" + Fun + ",出现问题：" + ex.Message + "!");
-
-                WiterLog("WiterLog", "我正在执行WiterLog_" + Fun + ",出现问题：" + ex.Message + "!");
-
-                //發送郵件
-                SendActionEmail(null, Fun, Fun + "-WiterLog", ex.Message, ex.ToString());
-                PassValue.TimeProjectJob.Remove(Fun);
+                //日志失败不再递归写日志/发邮件,只尝试写事件查看器
+                TryWriteEventLog("WiterLog_" + Fun + " 出现问题：" + ex.Message);
             }
         }
+
+        private void TryWriteEventLog(string message)
+        {
+            try
+            {
+                EventLog.WriteEntry(message);
+            }
+            catch
+            {
+                //事件源未注册等情况下忽略
+            }
+        }
+
         #endregion
 
         #region 发送邮件
+
         /// <summary>
-        /// 程序运行错误,发送紧急邮件
-        /// [ACTION] - XXXX
+        /// 程序运行错误,发送紧急邮件 [ACTION] - XXXX
+        /// 同类错误在节流窗口内只发一封,避免邮件风暴
         /// </summary>
-        public void SendActionEmail(DataTable dt, string Fun,string FunDetails, string Message,string Details)
+        public void SendActionEmail(DataTable dt, string Fun, string FunDetails, string Message, string Details)
         {
+            string throttleKey = (Fun ?? "") + "|" + (FunDetails ?? "") + "|" + (Message ?? "");
+            if (!MailThrottle.Allow(throttleKey))
+            {
+                WiterLog(string.IsNullOrEmpty(Fun) ? "System" : Fun, "[ACTION]邮件已节流(" + MailThrottle.ThrottleMinutes + "分钟内同类错误只发一封)：" + FunDetails + " - " + Message);
+                return;
+            }
+
             string MailTo = "";
             if (dt != null && dt.Rows.Count > 0)
             {
-                MailTo = dt.Rows[0]["MailTo"].ToString().Trim();
+                MailTo = GetField(dt, "MailTo");
             }
 
-            MailTo = MailTo.Trim();
-            //判斷fun是否配置了發送地址
-            if (MailTo != "")
+            //合并任务配置的收件人和全局SendTo
+            if (!string.IsNullOrWhiteSpace(SendTo))
             {
-                if (MailTo.Substring(MailTo.Length - 1, 1).LastIndexOf(";") > 0)
-                {
-                    MailTo = MailTo.Substring(0, MailTo.Length - 1);
-                }
-
-                MailTo += ";" + SendTo;
+                MailTo = string.IsNullOrWhiteSpace(MailTo) ? SendTo : MailTo + ";" + SendTo;
             }
-            else
+
+            if (string.IsNullOrWhiteSpace(MailTo))
             {
-                MailTo = SendTo;
-            }
-            
-            //收件人为空 不发送邮件
-            if (MailTo.Trim() != "")
-            {
-                WiterLog(Fun, "收件人为：" + MailTo.Trim());
-                WiterLog("Mail", FunDetails+"收件人为：" + MailTo.Trim());
-                //附件
-                string[] file = { };
-
-                //主题
-                string Subject = " [ACTION]-["+ProgramName+"]-["+ FunDetails + "]-["+ Message + "]";
-
-                //正文
-                //string Body = "<table> <tr style=\"height: 40px;\"><td style=\"width: 80px;text-align: left;vertical-align:top;\">Dear All:</td><td style=\"width: 80px;text-align: left;vertical-align:top;\"></td style=\"text-align: left;vertical-align:top;\"><td></td></tr> <tr style=\"height: 40px;\"><td style=\"text-align: left;vertical-align:top;\"></td><td style=\"text-align: left;vertical-align:top;\" colspan=\"2\">" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " 程序出現異常情況，請緊急處理！！！</td></tr> <tr style=\"height: 40px;\"><td style=\"text-align: left;vertical-align:top;\"></td><td style=\"text-align: left;vertical-align:top;\">異常情況描述:</td><td style=\"text-align: left;vertical-align:top;\">" + Message + "</td></tr> <tr style=\"height: 40px;\"><td></td><td style=\"text-align: left;vertical-align:top;\">異常情況詳情:</td><td style=\"text-align: left;vertical-align:top;\">" + Details + "</td></tr></table>";
-
-                string Body = "<table>";
-                Body += " <tr style=\"height: 40px;\"><td style=\"width:80px;text-align:left;vertical-align:top;\">Dear All:</td><td style=\"width:80px;text-align:left;vertical-align:top;\"></td style=\"text-align:left;vertical-align:top;\"><td></td></tr>";
-                Body += "<tr style=\"height:40px;\"><td style=\"text-align: left;vertical-align:top;\"></td><td style=\"text-align: left;vertical-align:top;\" colspan=\"2\"> " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " 程序出現異常情況，請緊急處理！！！</td></tr>";
-                Body += "<tr style=\"height:40px;\"><td style=\"text-align: left;vertical-align:top;\"></td><td style=\"text-align: left;vertical-align:top;\" colspan=\"2\">異常情況描述:" + Message + " </td></tr>";
-                Body += "<tr style=\"height:40px;\"><td style=\"text-align: left;vertical-align:top;\"></td><td style=\"text-align: left;vertical-align:top;\" colspan=\"2\">異常情況詳情:<br/>" + Details + "</td></tr></table>";
-
-                //发送邮件
-                string Res = Send.SendmailFile(MailTo.Trim(), file, Subject, Body, MailPriority.High);
-
-                WiterLog(Fun, Res);
-                WiterLog("Mail", FunDetails +","+Res);
-            }
-            else
-            {
-                WiterLog(Fun, "收件人为空,邮件无法发送!");
+                WiterLog(string.IsNullOrEmpty(Fun) ? "System" : Fun, "收件人为空,邮件无法发送!");
                 WiterLog("Mail", FunDetails + "收件人为空,邮件无法发送!");
+                return;
             }
+
+            WiterLog(string.IsNullOrEmpty(Fun) ? "System" : Fun, "收件人为：" + MailTo.Trim());
+            WiterLog("Mail", FunDetails + " 收件人为：" + MailTo.Trim());
+
+            string Subject = " [ACTION]-[" + ProgramName + "]-[" + FunDetails + "]-[" + Message + "]";
+
+            string Body = "<table>";
+            Body += "<tr style=\"height:40px;\"><td style=\"width:80px;text-align:left;vertical-align:top;\">Dear All:</td><td style=\"width:80px;text-align:left;vertical-align:top;\"></td><td></td></tr>";
+            Body += "<tr style=\"height:40px;\"><td style=\"text-align:left;vertical-align:top;\"></td><td style=\"text-align:left;vertical-align:top;\" colspan=\"2\"> " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " 程序出現異常情況，請緊急處理！！！</td></tr>";
+            Body += "<tr style=\"height:40px;\"><td style=\"text-align:left;vertical-align:top;\"></td><td style=\"text-align:left;vertical-align:top;\" colspan=\"2\">異常情況描述:" + Message + " </td></tr>";
+            Body += "<tr style=\"height:40px;\"><td style=\"text-align:left;vertical-align:top;\"></td><td style=\"text-align:left;vertical-align:top;\" colspan=\"2\">異常情況詳情:<br/>" + Details + "</td></tr></table>";
+
+            string Res = Send.SendmailFile(MailTo.Trim(), new string[] { }, Subject, Body, MailPriority.High);
+            WiterLog(string.IsNullOrEmpty(Fun) ? "System" : Fun, Res);
+            WiterLog("Mail", FunDetails + "," + Res);
         }
 
         /// <summary>
-        /// 程序运行成功,发送邮件通知
+        /// 程序运行成功,发送邮件通知 [INFO] - XXXX
         /// </summary>
         public void SendInfoEmail(DataTable dt, string Fun, string FunDetails, string Message, string Details)
         {
             string MailTo = "";
             if (dt != null && dt.Rows.Count > 0)
             {
-                string SendMail = dt.Rows[0]["SendMail"].ToString().Trim();
-                if (SendMail.ToLower() != "true")
+                string sendMail = GetField(dt, "SendMail");
+                if (!sendMail.Equals("true", StringComparison.OrdinalIgnoreCase))
                 {
                     //不需要發送郵件
                     return;
                 }
-                MailTo = dt.Rows[0]["MailTo"].ToString().Trim();
+                MailTo = GetField(dt, "MailTo");
             }
 
-            MailTo = MailTo.Trim();
-            
-            if (InfoMessage.ToLower()== "true")
+            //InfoMessage为true时,合并全局SendTo地址
+            if (string.Equals(InfoMessage, "true", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(SendTo))
             {
-                //判斷fun是否配置了發送地址
-                if (MailTo != "")
-                {
-                    if (MailTo.Substring(MailTo.Length - 1, 1).LastIndexOf(";") > 0)
-                    {
-                        MailTo = MailTo.Trim();
-                        MailTo = MailTo.Substring(0, MailTo.Length - 1);
-                    }
-
-                    MailTo += ";" + SendTo;
-                }
-                else
-                {
-                    MailTo = SendTo;
-                }
+                MailTo = string.IsNullOrWhiteSpace(MailTo) ? SendTo : MailTo + ";" + SendTo;
             }
 
-            //收件人为空 不发送邮件
-            if (MailTo.Trim() != "")
-            {
-                WiterLog(Fun, "收件人为：" + MailTo.Trim());
-                WiterLog("Mail", FunDetails + "收件人为：" + MailTo.Trim());
-                //附件
-                string[] file = { };
-
-                //主题
-                string Subject = " [INFO]-[" + ProgramName + "]-[" + FunDetails + "]-[" + Message + "]";
-
-                //正文
-                //string Body = "<table> <tr style=\"height: 40px;\"><td style=\"width: 80px;text-align: left;vertical-align:top;\">Dear All:</td><td style=\"width: 80px;text-align: left;vertical-align:top;\"></td style=\"text-align: left;vertical-align:top;\"><td></td></tr> <tr style=\"height: 40px;\"><td style=\"text-align: left;vertical-align:top;\"></td><td style=\"text-align: left;vertical-align:top;\" colspan=\"2\">" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " 程序執行成功</td></tr> <tr style=\"height: 40px;\"><td style=\"text-align: left;vertical-align:top;\"></td><td style=\"text-align: left;vertical-align:top;\">執行結果:</td><td style=\"text-align: left;vertical-align:top;\">" + Message + "</td></tr> <tr style=\"height: 40px;\"><td></td><td style=\"text-align: left;vertical-align:top;\">執行結果詳情:</td><td style=\"text-align: left;vertical-align:top;\">" + Details + "</td></tr></table>";
-
-                string Body = "<table>";
-                Body += " <tr style=\"height: 40px;\"><td style=\"width:80px;text-align:left;vertical-align:top;\">Dear All:</td><td style=\"width:80px;text-align:left;vertical-align:top;\"></td style=\"text-align:left;vertical-align:top;\"><td></td></tr>";
-                Body += "<tr style=\"height:40px;\"><td style=\"text-align: left;vertical-align:top;\"></td><td style=\"text-align: left;vertical-align:top;\" colspan=\"2\"> " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " 程序執行成功</td></tr>";
-                Body += "<tr style=\"height:40px;\"><td style=\"text-align: left;vertical-align:top;\"></td><td style=\"text-align: left;vertical-align:top;\" colspan=\"2\">執行結果:" + Message + " </td></tr>";
-                Body += "<tr style=\"height:40px;\"><td style=\"text-align: left;vertical-align:top;\"></td><td style=\"text-align: left;vertical-align:top;\" colspan=\"2\">執行結果詳情:<br/> " + Details + "</td></tr></table>";
-
-
-                //发送邮件
-                string Res = Send.SendmailFile(MailTo.Trim(), file, Subject, Body,MailPriority.Normal);
-
-                WiterLog(Fun, Res);
-                WiterLog("Mail", FunDetails + "," + Res);
-            }
-            else
+            if (string.IsNullOrWhiteSpace(MailTo))
             {
                 WiterLog(Fun, "收件人为空,邮件无法发送!");
                 WiterLog("Mail", FunDetails + "收件人为空,邮件无法发送!");
+                return;
             }
+
+            WiterLog(Fun, "收件人为：" + MailTo.Trim());
+            WiterLog("Mail", FunDetails + " 收件人为：" + MailTo.Trim());
+
+            string Subject = " [INFO]-[" + ProgramName + "]-[" + FunDetails + "]-[" + Message + "]";
+
+            string Body = "<table>";
+            Body += "<tr style=\"height:40px;\"><td style=\"width:80px;text-align:left;vertical-align:top;\">Dear All:</td><td style=\"width:80px;text-align:left;vertical-align:top;\"></td><td></td></tr>";
+            Body += "<tr style=\"height:40px;\"><td style=\"text-align:left;vertical-align:top;\"></td><td style=\"text-align:left;vertical-align:top;\" colspan=\"2\"> " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " 程序執行成功</td></tr>";
+            Body += "<tr style=\"height:40px;\"><td style=\"text-align:left;vertical-align:top;\"></td><td style=\"text-align:left;vertical-align:top;\" colspan=\"2\">執行結果:" + Message + " </td></tr>";
+            Body += "<tr style=\"height:40px;\"><td style=\"text-align:left;vertical-align:top;\"></td><td style=\"text-align:left;vertical-align:top;\" colspan=\"2\">執行結果詳情:<br/> " + Details + "</td></tr></table>";
+
+            string Res = Send.SendmailFile(MailTo.Trim(), new string[] { }, Subject, Body, MailPriority.Normal);
+            WiterLog(Fun, Res);
+            WiterLog("Mail", FunDetails + "," + Res);
         }
+
         #endregion
     }
 }

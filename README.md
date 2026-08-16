@@ -1,31 +1,34 @@
 # TaskTimerSharp
-TaskTimer 是一个基于 Windows 服务的定时任务调度系统，支持按时间间隔或周期性地调用 API 接口、执行数据库任务，并可在执行成功后发送邮件通知。配置简单，功能灵活，适用于企业内部接口调度、定时任务管理等场景。
+TaskTimer 是一个基于 Windows 服务的定时任务调度系统，支持按时间间隔或周期性地调用 API 接口、执行数据库存储过程，并可在执行成功后发送邮件通知。配置简单，功能灵活，适用于企业内部接口调度、定时任务管理等场景。
 
-🔧 功能特性
-⏱ 支持固定时间间隔和周期性执行（如每日、每周）
+### 功能特性
+- 支持固定时间间隔和周期性执行（如每日、每周）
+- 支持配置开始时间和结束时间
+- 可通过 HTTP(GET) 调用外部 API 接口、运行存储过程（支持 API+存储过程 的顺序执行）
+- 支持执行成功后自动发送邮件通知，执行异常发送 [ACTION] 告警邮件（同类错误自动节流，避免邮件风暴）
+- 可配置安全验证机制（时间戳 + SHA1 签名）
+- 支持失败自动重试（可配置重试次数与间隔）
+- 执行历史持久化（Log/History 目录），服务重启后周期任务不会当天重复执行
+- 配置通过 XML 文件驱动，修改任务配置无需重启服务（每秒自动加载）
+- 基于 .NET Framework 4.8，Windows 服务后台运行
 
-📆 支持配置开始时间和结束时间
-
-🌐 可通过 HTTP 调用外部 API 接口，运行存储过程
-
-📬 支持执行成功后自动发送邮件通知
-
-🛡 可配置安全验证机制（如 API 密钥）
-
-🧩 配置通过 XML 文件驱动，易于部署与修改
-
-💻 基于 Windows 服务运行，稳定、后台执行
+### 任务类型（Type）
+| Type | 说明 |
+|------|------|
+| 0 | 调用单个 API（GET），接口地址配置在 `NameEN_Setup.xml` 的 `ApiUrl` |
+| 1 | 顺序执行，步骤配置在 `NameEN_Sequence.xml`（API 与存储过程可混合，任一步失败立即中断后续步骤） |
+| 2 | 独立执行存储过程，存储过程名配置在 `NameEN_Setup.xml` 的 `StoredProcedure`，并需配置 `ConnStr` |
 
 ### 配置说明
 #### 系统设置
-默认再System文件夹中。多给此XML添加一个节点,系统会自动创建相应的文件夹[NameEN]。命名规则：TimeProjectJob.xml
+默认在 System 文件夹中。每给此 XML 添加一个节点，系统会自动创建相应的文件夹[NameEN]。命名规则：TimeProjectJob.xml
 ```xml
 <TimeProject>
   <TimeProjectJob>
     <NameCN>任务1</NameCN><!--job 中文名称-->
     <NameEN>Jobone</NameEN><!--job 英文名称 必填 创建文件夹只用这个名称 避免用特殊字符 可能会造成创建文件夹不成功-->
     <Status>True</Status><!--是否执行   执行:True  停止执行：False-->
-    <Type>0</Type><!--执行状态  0：调用API  1: 顺序执行（必须有FUN_Sequence.xml 配合才能使用）  2：执行存储过程（暂时还没有）-->
+    <Type>0</Type><!--任务类型  0：调用API  1：顺序执行（必须有 NameEN_Sequence.xml 配合）  2：独立执行存储过程-->
   </TimeProjectJob>
   <TimeProjectJob>
     <NameCN>任务2</NameCN>
@@ -43,31 +46,35 @@ TaskTimer 是一个基于 Windows 服务的定时任务调度系统，支持按�
 ```
 
 #### 单个执行的配置文件
-在这个文件夹中加入这个XML文件,按规则设置好定时时间。 命名规则：NameEN_Setup.xml [文件夹的名字_Setup.xml]
+在任务文件夹中放入此 XML 文件，按规则设置好定时时间。命名规则：NameEN_Setup.xml [文件夹的名字_Setup.xml]
 ```xml
 <TimeProject>
   <TimeProjectJob>
-    <StartTime>2020-01-14 16:47</StartTime> <!-- 可选，任务开始时间 -->
-    <EndTime>2020-01-14 16:48</EndTime>     <!-- 可选，任务结束时间 -->
+    <StartTime>2020-01-14 16:47</StartTime> <!-- 可选，任务开始时间，格式 yyyy-MM-dd HH:mm -->
+    <EndTime>2020-01-14 16:48</EndTime>     <!-- 可选，任务结束时间，格式 yyyy-MM-dd HH:mm -->
     <ExecutionStatus>0</ExecutionStatus>    <!-- 执行模式：0 为按间隔，1 为按周期 -->
-    <IntervalsTime>30</IntervalsTime>       <!-- 执行间隔时间，单位：秒 -->
-    <CycltType>EveryWeek</CycltType>        <!-- 周期类型，可选：EveryDay / EveryWeek -->
-    <DayOfWeek>Monday</DayOfWeek>           <!-- 每周任务执行的具体星期几 -->
-    <SpecificTime>05:00</SpecificTime>      <!-- 执行时间点（24小时制） -->
-    <ApiUrl>Url</ApiUrl>                    <!-- 请求接口地址Get -->
+    <IntervalsTime>30</IntervalsTime>       <!-- 执行间隔时间，单位：秒（执行模式0使用，从上次执行完成开始计时） -->
+    <CycltType>EveryWeek</CycltType>        <!-- 周期类型，可选：EveryDay / EveryWeek（执行模式1使用） -->
+    <DayOfWeek>Monday</DayOfWeek>           <!-- 每周任务执行的具体星期几，英文 Monday~Sunday（执行模式1使用） -->
+    <SpecificTime>05:00</SpecificTime>      <!-- 执行时间点，24小时制 HH:mm（执行模式1使用） -->
+    <ApiUrl>Url</ApiUrl>                    <!-- 请求接口地址Get（Type=0使用） -->
+    <StoredProcedure></StoredProcedure>     <!-- 存储过程名称（Type=2使用，需同时配置ConnStr） -->
     <Remark>获取任务1</Remark>               <!-- 描述任务用途 -->
-    <MailTo>xxxx@gmail.com</MailTo>         <!-- 执行成功后通知的收件人 -->
+    <MailTo>xxxx@gmail.com</MailTo>         <!-- 执行成功后通知的收件人，多个用;分隔 -->
     <SendMail>True</SendMail>               <!-- 是否发送通知邮件 -->
-    <ConnStr></ConnStr>                     <!-- 可选数据库连接字符串 -->
+    <ConnStr></ConnStr>                     <!-- 数据库连接字符串（顺序执行含存储过程步骤、或Type=2时必填） -->
     <Verification>False</Verification>      <!-- 是否启用 API 密钥验证 -->
     <AuthenticationKey></AuthenticationKey><!-- 安全验证密钥 -->
+    <RetryCount>0</RetryCount>              <!-- 可选，失败重试次数，默认0不重试，最大10 -->
+    <RetryInterval>60</RetryInterval>       <!-- 可选，重试间隔秒数，默认60 -->
+    <HttpTimeout>600</HttpTimeout>          <!-- 可选，HTTP请求超时秒数，默认600 -->
   </TimeProjectJob>
 </TimeProject>
 ```
 
-### 按顺序执行的配置文件
-需要在"系统设置"将指定任务Type改为1
-在文件加中再加如一个新的XML文件。命名规则：NameEN_Sequence.xml [文件夹的名字_Sequence.xml]
+#### 按顺序执行的配置文件
+需要在"系统设置"将指定任务 Type 改为 1。在任务文件夹中加入一个新的 XML 文件，命名规则：NameEN_Sequence.xml [文件夹的名字_Sequence.xml]。
+按配置顺序依次执行，任一步失败会立即中断后续步骤并发送告警邮件。
 ```xml
 <TimeProject>
   <TimeProjectJob>
@@ -86,11 +93,12 @@ TaskTimer 是一个基于 Windows 服务的定时任务调度系统，支持按�
 ```
 
 ### 邮件设置
-在TimerProjectByWindowsService.exe.config 中配置
+在 TimerProjectByWindowsService.exe.config 中配置。
+> 安全提示：`MailPassWord` 不要提交真实密码到代码库。仓库中的 app.config 只保留占位符，部署时在服务器安装目录的 .exe.config 中填写真实密码。
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
 <configuration>
-<startup><supportedRuntime version="v4.0" sku=".NETFramework,Version=v4.5"/></startup>
+<startup><supportedRuntime version="v4.0" sku=".NETFramework,Version=v4.8"/></startup>
   <appSettings>
     <!--指定发送邮件的服务器地址或IP，如smtp.163.com-->
     <add key="MailHost" value="smtp.office365.com"/>
@@ -100,8 +108,8 @@ TaskTimer 是一个基于 Windows 服务的定时任务调度系统，支持按�
     <add key="MailAddress" value="xxxx@163.com"/>
     <!--发件人邮箱用户名-->
     <add key="MailDisplayName" value="Test定時程序"/>
-    <!--发件人邮箱密码-->
-    <add key="MailPassWord" value="123445"/>
+    <!--发件人邮箱密码（部署时填写，勿提交到代码库）-->
+    <add key="MailPassWord" value=""/>
     <!--发件人是否要SSL加密-->
     <add key="SSL" value="true"/>
     <!--程序名称,表明当前是哪只定时程序-->
@@ -113,6 +121,10 @@ TaskTimer 是一个基于 Windows 服务的定时任务调度系统，支持按�
   </appSettings>
 </configuration>
 ```
+
+### 运行日志与执行历史
+- 运行日志：`安装目录\Log\任务名\yyyyMM\yyyyMMdd.log`
+- 执行历史：`安装目录\Log\History\任务名\yyyyMM.csv`，每次执行记录：时间、触发方式、耗时、状态（成功/失败）、结果摘要。服务重启后，周期任务会读取当天历史，避免同一天重复执行。
 
 ### 安装说明
 所有操作，请在管理员模式运行，否则可能不成功
@@ -150,8 +162,3 @@ CMD >  services.msc
 禁用服务：sc config 服务名 start=disabled  
 将服务设为自动启动：sc config 服务名 start= auto  
 将服务设为手动启动：sc config 服务名 start= demand  
-
-
-
-
-

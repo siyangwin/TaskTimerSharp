@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.IO;
@@ -119,37 +119,64 @@ namespace TimerProjectByWindowsService.Common
 
         /// <summary>
         /// 读取最大的Xml  判断有多少需要执行的JOB
+        /// 列取所有节点子元素的并集，某个任务多/少字段不会导致崩溃，缺失字段读出来是空字符串
         /// </summary>
         /// <param name="FilePath">文件的保存路径</param>
         /// <param name="FileName">文件名称</param>
         /// <returns></returns>
         public virtual DataTable GetXmlInfo(string FilePath, string FileName)
         {
-            if (File.Exists(FilePath + "\\" + FileName))
+            string fullPath = Path.Combine(FilePath, FileName);
+            if (!File.Exists(fullPath))
             {
-                DataTable DT = new DataTable();
-                XmlDocument xml = new XmlDocument();
-                xml.Load(FilePath + "\\" + FileName);
-                XmlNodeList xnl = xml.SelectSingleNode("TimeProject").ChildNodes;
-                if (xnl.Count > 0)
-                {
-                    DT = CreateDataTable(xnl[0]);
-                }
-                foreach (XmlNode xns in xnl)
-                {
-                    DataRow DR = DT.NewRow();
-                    for (int i = 0; i < xns.ChildNodes.Count; i++)
-                    {
-                        if (xns.ChildNodes[i].NodeType != XmlNodeType.Comment) // 判断不等于注释时
-                        {
-                            DR[xns.ChildNodes[i].Name] = xns.ChildNodes[i].InnerText;
-                        }
-                    }
-                    DT.Rows.Add(DR);
-                }
-                return DT;
+                return new DataTable();
             }
-            return new DataTable();
+
+            XmlDocument xml = new XmlDocument();
+            xml.Load(fullPath);
+
+            XmlNode root = xml.SelectSingleNode("TimeProject");
+            if (root == null)
+            {
+                return new DataTable();
+            }
+
+            //收集所有任务节点（跳过注释等非元素节点）
+            List<XmlNode> jobNodes = new List<XmlNode>();
+            foreach (XmlNode node in root.ChildNodes)
+            {
+                if (node.NodeType == XmlNodeType.Element)
+                {
+                    jobNodes.Add(node);
+                }
+            }
+
+            DataTable DT = new DataTable();
+            //列取所有节点子元素的并集
+            foreach (XmlNode node in jobNodes)
+            {
+                foreach (XmlNode child in node.ChildNodes)
+                {
+                    if (child.NodeType == XmlNodeType.Element && !DT.Columns.Contains(child.Name))
+                    {
+                        DT.Columns.Add(child.Name);
+                    }
+                }
+            }
+
+            foreach (XmlNode node in jobNodes)
+            {
+                DataRow DR = DT.NewRow();
+                foreach (XmlNode child in node.ChildNodes)
+                {
+                    if (child.NodeType == XmlNodeType.Element)
+                    {
+                        DR[child.Name] = child.InnerText;
+                    }
+                }
+                DT.Rows.Add(DR);
+            }
+            return DT;
         }
 
 
@@ -201,23 +228,6 @@ namespace TimerProjectByWindowsService.Common
         }
 
 
-        /// <summary>
-        /// 将XML转换为DataTable
-        /// </summary>
-        /// <param name="xn"></param>
-        /// <returns></returns>
-        private DataTable CreateDataTable(XmlNode xn)
-        {
-            System.Data.DataTable DT = new System.Data.DataTable();
-            for (int i = 0; i < xn.ChildNodes.Count; i++)
-            {
-                if (xn.ChildNodes[i].NodeType != XmlNodeType.Comment) // 判断不等于注释时
-                {
-                    DT.Columns.Add(xn.ChildNodes[i].Name);
-                }
-            }
-            return DT;
-        }
         #endregion
 
         #region 安全验证必须
@@ -227,23 +237,34 @@ namespace TimerProjectByWindowsService.Common
         /// <returns></returns>
         public static string GetTimeStampBySeconds()
         {
-            TimeSpan ts = DateTime.Now - new DateTime(1970, 1, 1, 0, 0, 0, 0);
+            TimeSpan ts = DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, 0);
             return Convert.ToInt64(ts.TotalSeconds).ToString();
         }
 
         /// <summary>
-        /// 返回SHA1
+        /// 返回SHA1（固定UTF8编码，保证不同服务器上签名一致）
         /// </summary>
         /// <param name="key"></param>
         /// <returns></returns>
         public static string GetSha1(string key)
         {
             //SHA1加密方法
-            var sha1 = new SHA1CryptoServiceProvider();
-            byte[] str01 = Encoding.Default.GetBytes(key);
-            byte[] str02 = sha1.ComputeHash(str01);
-            var result = BitConverter.ToString(str02).Replace("-", "");
-            return result;
+            using (var sha1 = new SHA1CryptoServiceProvider())
+            {
+                byte[] str01 = Encoding.UTF8.GetBytes(key);
+                byte[] str02 = sha1.ComputeHash(str01);
+                var result = BitConverter.ToString(str02).Replace("-", "");
+                return result;
+            }
+        }
+
+        /// <summary>
+        /// 截断字符串，超长内容写日志/邮件/历史时避免巨大报文
+        /// </summary>
+        public static string Truncate(string value, int maxLength)
+        {
+            if (string.IsNullOrEmpty(value) || value.Length <= maxLength) return value;
+            return value.Substring(0, maxLength) + "...(已截断,原长度" + value.Length + ")";
         }
 
 

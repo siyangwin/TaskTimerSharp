@@ -1,4 +1,4 @@
-﻿namespace TimerProjectByWindowsService
+namespace TimerProjectByWindowsService
 {
     partial class MainService
     {
@@ -31,7 +31,7 @@
             // 
             // Service1
             // 
-            this.ServiceName = "Service1";
+            this.ServiceName = "TimeProject";
 
         }
 

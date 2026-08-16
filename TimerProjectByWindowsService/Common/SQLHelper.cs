@@ -1,22 +1,20 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
+using System;
 using System.Data.SqlClient;
 using System.Data;
 using System.Collections;
-using System.Configuration;
+
 namespace TimerProjectByWindowsService.Common
 {
 
     /// <summary>
     /// SqlHelper类是专门提供给广大用户用于高性能、可升级和最佳练习的sql数据操作
+    /// 注意：执行失败时异常会向上抛出，由调用方决定如何处理（原版会吞掉异常假装成功）。
     /// </summary>
     public abstract class SQLHelper
     {
+        //数据库命令超时时间（秒），30分钟。原版设为约23天，等于没有超时，挂死的存储过程会永久占用任务锁
+        private const int DefaultCommandTimeout = 1800;
 
-        //数据库连接字符串
-        //public static readonly string Con = System.Configuration.ConfigurationManager.AppSettings["SQLServer"];
-        //public static readonly string Conn = System.Configuration.ConfigurationManager.ConnectionStrings["DBConn"].ConnectionString;
         // 用于缓存参数的HASH表
         private static Hashtable parmCache = Hashtable.Synchronized(new Hashtable());
 
@@ -24,15 +22,14 @@ namespace TimerProjectByWindowsService.Common
         ///  给定连接的数据库用假设参数执行一个sql命令（不返回数据集）
         /// </summary>
         /// <param name="connectionString">一个有效的连接字符串</param>
-        /// <param name="commandType">命令类型(存储过程, 文本, 等等)</param>
+        /// <param name="cmdType">命令类型(存储过程, 文本, 等等)</param>
         /// <param name="commandText">存储过程名称或者sql命令语句</param>
         /// <param name="commandParameters">执行命令所用参数的集合</param>
         /// <returns>执行命令所影响的行数</returns>
         public static int ExecuteNonQuery(string connectionString, CommandType cmdType, string cmdText, params SqlParameter[] commandParameters)
         {
-
             SqlCommand cmd = new SqlCommand();
-            cmd.CommandTimeout = 2000000;
+            cmd.CommandTimeout = DefaultCommandTimeout;
             using (SqlConnection conn = new SqlConnection(connectionString))
             {
                 try
@@ -42,32 +39,25 @@ namespace TimerProjectByWindowsService.Common
                     cmd.Parameters.Clear();
                     return val;
                 }
-                catch (Exception Ex)
-                {
-                    return 0;
-                }
                 finally
                 {
                     cmd.Parameters.Clear();
                 }
-
             }
         }
-        //5_1_a_s_p_x.c_o_m
 
         /// <summary>
-        /// 用现有的数据库连接执行一个sql命令（不返回数据集）
+        ///  用现有的数据库连接执行一个sql命令（不返回数据集）
         /// </summary>
         /// <param name="conn">一个现有的数据库连接</param>
-        /// <param name="commandType">命令类型(存储过程, 文本, 等等)</param>
+        /// <param name="cmdType">命令类型(存储过程, 文本, 等等)</param>
         /// <param name="commandText">存储过程名称或者sql命令语句</param>
         /// <param name="commandParameters">执行命令所用参数的集合</param>
         /// <returns>执行命令所影响的行数</returns>
         public static int ExecuteNonQuery(SqlConnection connection, CommandType cmdType, string cmdText, params SqlParameter[] commandParameters)
         {
-
             SqlCommand cmd = new SqlCommand();
-            cmd.CommandTimeout = 2000000;
+            cmd.CommandTimeout = DefaultCommandTimeout;
             PrepareCommand(cmd, connection, null, cmdType, cmdText, commandParameters);
             int val = cmd.ExecuteNonQuery();
             cmd.Parameters.Clear();
@@ -91,24 +81,18 @@ namespace TimerProjectByWindowsService.Common
                 SqlDataAdapter adt = new SqlDataAdapter();
 
                 adt.SelectCommand = cmd;
-                adt.SelectCommand.CommandTimeout = 2000000;
-                SqlCommandBuilder cbd = new SqlCommandBuilder(adt);
+                adt.SelectCommand.CommandTimeout = DefaultCommandTimeout;
                 DataSet ds = new DataSet();
                 try
                 {
                     adt.Fill(ds);
                     return ds;
                 }
-                catch (Exception Ex)
-                {
-                    return null;
-                }
                 finally
                 {
                     cmd.Parameters.Clear();
                 }
             }
-
         }
 
         /// <summary>
@@ -125,9 +109,7 @@ namespace TimerProjectByWindowsService.Common
             PrepareCommand(cmd, connection, null, cmdType, cmdText, commandParameters);
             SqlDataAdapter adt = new SqlDataAdapter();
             adt.SelectCommand = cmd;
-            adt.SelectCommand.CommandTimeout = 2000000;
-            //adt.
-            SqlCommandBuilder cbd = new SqlCommandBuilder(adt);
+            adt.SelectCommand.CommandTimeout = DefaultCommandTimeout;
 
             DataSet ds = new DataSet();
             try
@@ -135,19 +117,11 @@ namespace TimerProjectByWindowsService.Common
                 adt.Fill(ds);
                 return ds.Tables[0];
             }
-            catch
-            {
-                return new DataTable();
-            }
             finally
             {
                 cmd.Parameters.Clear();
             }
-
-
         }
-
-
 
         /// <summary>
         /// 用现有的数据库连接执行一个返回数据表的sql命令
@@ -165,18 +139,13 @@ namespace TimerProjectByWindowsService.Common
                 PrepareCommand(cmd, conn, null, cmdType, cmdText, commandParameters);
                 SqlDataAdapter adt = new SqlDataAdapter();
                 adt.SelectCommand = cmd;
-                adt.SelectCommand.CommandTimeout = 2000000;
-                SqlCommandBuilder cbd = new SqlCommandBuilder(adt);
+                adt.SelectCommand.CommandTimeout = DefaultCommandTimeout;
 
                 DataSet ds = new DataSet();
                 try
                 {
                     adt.Fill(ds);
                     return ds.Tables[0];
-                }
-                catch (Exception Ex)
-                {
-                    return new DataTable();
                 }
                 finally
                 {
@@ -186,30 +155,26 @@ namespace TimerProjectByWindowsService.Common
         }
 
         /// <summary>
-        ///使用现有的SQL事务执行一个sql命令（不返回数据集）
+        ///使用现有的SQL事务执行一个sql命令（不返回数据集） 
         /// </summary>
         /// <remarks>
         ///举例:  
         ///  int result = ExecuteNonQuery(connString, CommandType.StoredProcedure, "PublishOrders", new SqlParameter("@prodid", 24));
         /// </remarks>
         /// <param name="trans">一个现有的事务</param>
-        /// <param name="commandType">命令类型(存储过程, 文本, 等等)</param>
+        /// <param name="cmdType">命令类型(存储过程, 文本, 等等)</param>
         /// <param name="commandText">存储过程名称或者sql命令语句</param>
         /// <param name="commandParameters">执行命令所用参数的集合</param>
         /// <returns>执行命令所影响的行数</returns>
         public static int ExecuteNonQuery(SqlTransaction trans, CommandType cmdType, string cmdText, params SqlParameter[] commandParameters)
         {
             SqlCommand cmd = new SqlCommand();
-            cmd.CommandTimeout = 2000000;
+            cmd.CommandTimeout = DefaultCommandTimeout;
             try
             {
                 PrepareCommand(cmd, trans.Connection, trans, cmdType, cmdText, commandParameters);
                 int val = cmd.ExecuteNonQuery();
                 return val;
-            }
-            catch (Exception Ex)
-            {
-                return -1;
             }
             finally
             {
@@ -225,7 +190,7 @@ namespace TimerProjectByWindowsService.Common
         ///  SqlDataReader r = ExecuteReader(connString, CommandType.StoredProcedure, "PublishOrders", new SqlParameter("@prodid", 24));
         /// </remarks>
         /// <param name="connectionString">一个有效的连接字符串</param>
-        /// <param name="commandType">命令类型(存储过程, 文本, 等等)</param>
+        /// <param name="cmdType">命令类型(存储过程, 文本, 等等)</param>
         /// <param name="commandText">存储过程名称或者sql命令语句</param>
         /// <param name="commandParameters">执行命令所用参数的集合</param>
         /// <returns>包含结果的读取器</returns>
@@ -233,7 +198,7 @@ namespace TimerProjectByWindowsService.Common
         {
             //创建一个SqlCommand对象
             SqlCommand cmd = new SqlCommand();
-            cmd.CommandTimeout = 2000000;
+            cmd.CommandTimeout = DefaultCommandTimeout;
             //创建一个SqlConnection对象
             SqlConnection conn = new SqlConnection(connectionString);
 
@@ -241,7 +206,7 @@ namespace TimerProjectByWindowsService.Common
             //因此commandBehaviour.CloseConnection 就不会执行
             try
             {
-                //调用 PrepareCommand 方法，对 SqlCommand 对象设置参数
+                //调用 PrepareCommand 方法，为 SqlCommand 对象设置参数
                 PrepareCommand(cmd, conn, null, cmdType, cmdText, commandParameters);
                 //调用 SqlCommand  的 ExecuteReader 方法
                 SqlDataReader reader = cmd.ExecuteReader(CommandBehavior.CloseConnection);
@@ -268,26 +233,21 @@ namespace TimerProjectByWindowsService.Common
         ///  Object obj = ExecuteScalar(connString, CommandType.StoredProcedure, "PublishOrders", new SqlParameter("@prodid", 24));
         /// </remarks>
         ///<param name="connectionString">一个有效的连接字符串</param>
-        /// <param name="commandType">命令类型(存储过程, 文本, 等等)</param>
-        /// <param name="commandText">存储过程名称或者sql命令语句</param>
-        /// <param name="commandParameters">执行命令所用参数的集合</param>
+        ///<param name="cmdType">命令类型(存储过程, 文本, 等等)</param>
+        ///<param name="cmdText">存储过程名称或者sql命令语句</param>
+        ///<param name="commandParameters">执行命令所用参数的集合</param>
         /// <returns>用 Convert.To{Type}把类型转换为想要的 </returns>
         public static object ExecuteScalar(string connectionString, CommandType cmdType, string cmdText, params SqlParameter[] commandParameters)
         {
             SqlCommand cmd = new SqlCommand();
-            cmd.CommandTimeout = 200000000;
+            cmd.CommandTimeout = DefaultCommandTimeout;
             using (SqlConnection connection = new SqlConnection(connectionString))
             {
                 PrepareCommand(cmd, connection, null, cmdType, cmdText, commandParameters);
                 try
                 {
                     object val = cmd.ExecuteScalar();
-                    //cmd.Parameters.Clear();
                     return val;
-                }
-                catch (Exception Ex)
-                {
-                    return Ex.Message;
                 }
                 finally
                 {
@@ -304,31 +264,25 @@ namespace TimerProjectByWindowsService.Common
         ///  Object obj = ExecuteScalar(connString, CommandType.StoredProcedure, "PublishOrders", new SqlParameter("@prodid", 24));
         /// </remarks>
         /// <param name="conn">一个存在的数据库连接</param>
-        /// <param name="commandType">命令类型(存储过程, 文本, 等等)</param>
-        /// <param name="commandText">存储过程名称或者sql命令语句</param>
+        /// <param name="cmdType">命令类型(存储过程, 文本, 等等)</param>
+        /// <param name="cmdText">存储过程名称或者sql命令语句</param>
         /// <param name="commandParameters">执行命令所用参数的集合</param>
         /// <returns>用 Convert.To{Type}把类型转换为想要的 </returns>
         public static object ExecuteScalar(SqlConnection connection, CommandType cmdType, string cmdText, params SqlParameter[] commandParameters)
         {
-
             SqlCommand cmd = new SqlCommand();
-            cmd.CommandTimeout = 200000000;
+            cmd.CommandTimeout = DefaultCommandTimeout;
             try
             {
                 PrepareCommand(cmd, connection, null, cmdType, cmdText, commandParameters);
                 object val = cmd.ExecuteScalar();
                 return val;
             }
-            catch (Exception Ex)
-            {
-                return Ex.Message;
-            }
             finally
             {
                 cmd.Parameters.Clear();
             }
         }
-
 
         /// <summary>
         /// 将参数集合添加到缓存
@@ -343,8 +297,7 @@ namespace TimerProjectByWindowsService.Common
         /// <summary>
         /// 找回缓存参数集合
         /// </summary>
-        /// <param name="cacheKey">用于找回参数的关键字</param>
-        /// <returns>缓存的参数集合</returns>
+        /// <param name="cacheKey">用于找回缓存的键</param>
         public static SqlParameter[] GetCachedParameters(string cacheKey)
         {
             SqlParameter[] cachedParms = (SqlParameter[])parmCache[cacheKey];
@@ -371,7 +324,6 @@ namespace TimerProjectByWindowsService.Common
         /// <param name="cmdParms">执行命令的参数</param>
         private static void PrepareCommand(SqlCommand cmd, SqlConnection conn, SqlTransaction trans, CommandType cmdType, string cmdText, SqlParameter[] cmdParms)
         {
-
             if (conn.State != ConnectionState.Open)
                 conn.Open();
 
@@ -389,11 +341,13 @@ namespace TimerProjectByWindowsService.Common
                     cmd.Parameters.Add(parm);
             }
         }
+
         public static string TestDB(string dbserver, string username, string password, string dbName, string successMsg, string failMsg)
         {
             SqlConnection sqlC = new SqlConnection("server=" + dbserver + ";user id=" + username + ";password=" + password + ";database=" + dbName);
             return TestDB(sqlC, successMsg, failMsg);
         }
+
         public static string TestDB(SqlConnection SC, string successMsg, string failMsg)
         {
             try
@@ -411,10 +365,12 @@ namespace TimerProjectByWindowsService.Common
                 SC.Dispose();
             }
         }
+
         public static string TestDB(string dbserver, string username, string password, string dbName)
         {
             return TestDB(dbserver, username, password, dbName, "连接测试成功", "连接测试失败");
         }
+
         public static string TestDB(SqlConnection SC)
         {
             return TestDB(SC, "连接测试成功", "连接测试失败");

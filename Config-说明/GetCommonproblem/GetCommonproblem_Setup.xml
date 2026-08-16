@@ -1,18 +1,22 @@
 <TimeProject>
   <TimeProjectJob>
-    <StartTime>2020-01-14 16:47</StartTime> <!-- 可选，任务开始时间 -->
-    <EndTime>2020-01-14 16:48</EndTime>     <!-- 可选，任务结束时间 -->
+    <StartTime>2020-01-14 16:47</StartTime> <!-- 可选，任务开始时间，格式 yyyy-MM-dd HH:mm -->
+    <EndTime>2020-01-14 16:48</EndTime>     <!-- 可选，任务结束时间，格式 yyyy-MM-dd HH:mm -->
     <ExecutionStatus>0</ExecutionStatus>    <!-- 执行模式：0 为按间隔，1 为按周期 -->
-    <IntervalsTime>30</IntervalsTime>       <!-- 执行间隔时间，单位：秒 -->
-    <CycltType>EveryWeek</CycltType>        <!-- 周期类型，可选：EveryDay / EveryWeek -->
-    <DayOfWeek>Monday</DayOfWeek>           <!-- 每周任务执行的具体星期几 -->
-    <SpecificTime>05:00</SpecificTime>      <!-- 执行时间点（24小时制） -->
-    <ApiUrl>Url</ApiUrl>                    <!-- 请求接口地址Get -->
+    <IntervalsTime>30</IntervalsTime>       <!-- 执行间隔时间，单位：秒（执行模式0使用） -->
+    <CycltType>EveryWeek</CycltType>        <!-- 周期类型，可选：EveryDay / EveryWeek（执行模式1使用） -->
+    <DayOfWeek>Monday</DayOfWeek>           <!-- 每周任务执行的具体星期几，英文 Monday~Sunday（执行模式1使用） -->
+    <SpecificTime>05:00</SpecificTime>      <!-- 执行时间点，24小时制 HH:mm（执行模式1使用） -->
+    <ApiUrl>Url</ApiUrl>                    <!-- 请求接口地址Get（Type=0使用） -->
+    <StoredProcedure></StoredProcedure>     <!-- 存储过程名称（Type=2使用，需同时配置ConnStr） -->
     <Remark>获取任务1</Remark>               <!-- 描述任务用途 -->
-    <MailTo>xxxx@gmail.com</MailTo>         <!-- 执行成功后通知的收件人 -->
+    <MailTo>xxxx@gmail.com</MailTo>         <!-- 执行成功后通知的收件人，多个用;分隔 -->
     <SendMail>True</SendMail>               <!-- 是否发送通知邮件 -->
-    <ConnStr></ConnStr>                     <!-- 可选数据库连接字符串 -->
+    <ConnStr></ConnStr>                     <!-- 可选数据库连接字符串（存储过程步骤/Type=2使用） -->
     <Verification>False</Verification>      <!-- 是否启用 API 密钥验证 -->
     <AuthenticationKey></AuthenticationKey><!-- 安全验证密钥 -->
+    <RetryCount>0</RetryCount>              <!-- 可选，失败重试次数，默认0不重试，最大10 -->
+    <RetryInterval>60</RetryInterval>       <!-- 可选，重试间隔秒数，默认60 -->
+    <HttpTimeout>600</HttpTimeout>          <!-- 可选，HTTP请求超时秒数，默认600 -->
   </TimeProjectJob>
 </TimeProject>
