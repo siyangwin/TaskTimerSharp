@@ -127,6 +127,7 @@ TaskTimer 是一个基于 Windows 服务的定时任务调度系统，支持按�
 - 执行历史：`安装目录\Log\History\任务名\yyyyMM.csv`，每次执行记录：时间、触发方式、耗时、状态（成功/失败）、结果摘要。服务重启后，周期任务会读取当天历史，避免同一天重复执行。
 
 ### 配置管理工具（TimerProjectConfigTool）
+<img width="1100" height="720" alt="image" src="https://github.com/user-attachments/assets/b7a00ac9-27e7-429d-8d40-735d903970d4" />
 图形化配置管理工具（WinForms，.NET Framework 4.8），与服务项目在同一解决方案中独立编译，互不引用。
 
 **部署方式**：把编译产物 `TimerProjectConfigTool.exe` 和 `Languages` 文件夹拷贝到服务安装根目录（与 TimerProjectByWindowsService.exe 同级），双击运行即可。工具默认以自身所在目录为根目录，也可在界面上切换，切换后会记住该目录，下次启动自动沿用。
@@ -142,7 +143,7 @@ TaskTimer 是一个基于 Windows 服务的定时任务调度系统，支持按�
 **注意**：重启服务需要管理员权限。若非管理员运行，工具会提示"以管理员身份重新运行本工具"或手动执行 `net stop TimeProject && net start TimeProject`。服务未安装的机器上重启按钮自动禁用。
 
 ### 安装说明
-所有操作，请在管理员模式运行，否则可能不成功
+所有操作，请在管理员模式CMD运行，否则可能不成功
 
 打开 .NET Framework
 
