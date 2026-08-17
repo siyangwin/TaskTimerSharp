@@ -40,7 +40,13 @@ namespace TimerProjectByWindowsService
         private readonly SendMail Send = new SendMail();
 
         //job子定时器注册表(停止服务/移除任务时需要找到并停掉它们)
-        private readonly Dictionary<string, System.Timers.Timer> _jobTimers = new Dictionary<string, System.Timers.Timer>();
+        private class JobState
+        {
+            public System.Timers.Timer Timer;
+            public int TickRunning; //子定时器重入守卫:上一轮调度(含同步发邮件)未结束时跳过本tick
+        }
+
+        private readonly Dictionary<string, JobState> _jobTimers = new Dictionary<string, JobState>();
         private readonly object _jobTimersLock = new object();
 
         //主循环重入标记
@@ -61,8 +67,13 @@ namespace TimerProjectByWindowsService
         {
             try
             {
-                TryWriteEventLog("我的服务启动");
-                WiterLog("System", "我的服务启动");
+                //注入日志写入器的外部报告通道(写事件查看器)
+                LogWriter.ExternalReporter = TryWriteEventLog;
+
+                string ver = "未知";
+                try { ver = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString(); } catch { }
+                TryWriteEventLog("我的服务启动 v" + ver);
+                WiterLog("System", "我的服务启动 v" + ver);
 
                 //初始化全局状态
                 PassValue.ClearRunningJobs();
@@ -98,21 +109,24 @@ namespace TimerProjectByWindowsService
                 }
 
                 //停掉所有job子定时器
-                List<System.Timers.Timer> timers;
+                List<JobState> states;
                 lock (_jobTimersLock)
                 {
-                    timers = new List<System.Timers.Timer>(_jobTimers.Values);
+                    states = new List<JobState>(_jobTimers.Values);
                     _jobTimers.Clear();
                 }
-                foreach (var timer in timers)
+                foreach (var state in states)
                 {
-                    timer.Enabled = false;
-                    timer.Dispose();
+                    if (state.Timer != null)
+                    {
+                        state.Timer.Enabled = false;
+                        state.Timer.Dispose();
+                    }
                 }
                 PassValue.ClearRunningJobs();
 
-                //等待在途任务结束,最多20秒,避免被SCM强杀时中断正在执行的API/存储过程
-                DateTime deadline = DateTime.Now.AddSeconds(20);
+                //等待在途任务结束,最多12秒(留余量给SCM的20秒强杀时限+日志排空)
+                DateTime deadline = DateTime.Now.AddSeconds(12);
                 while (PassValue.HasLockedJobs() && DateTime.Now < deadline)
                 {
                     Thread.Sleep(500);
@@ -121,6 +135,8 @@ namespace TimerProjectByWindowsService
 
                 TryWriteEventLog("我的服务停止");
                 WiterLog("System", "我的服务停止");
+                //等待日志排空(最多5秒)后再退出,保证最后一条日志落盘
+                LogWriter.Shutdown(TimeSpan.FromSeconds(5));
             }
             catch (Exception ex)
             {
@@ -231,31 +247,32 @@ namespace TimerProjectByWindowsService
             //周期任务:根据执行历史恢复"今日已执行"状态,防止服务重启后当天重复执行
             RestoreExecutedTodayFromHistory(fun);
 
-            System.Timers.Timer timer = new System.Timers.Timer(1000) { AutoReset = true };
-            timer.Elapsed += (o, e) => JobTimer_Elapsed(fun, kind);
+            var state = new JobState();
+            state.Timer = new System.Timers.Timer(1000) { AutoReset = true };
+            state.Timer.Elapsed += (o, e) => JobTimer_Elapsed(fun, kind, state);
 
             lock (_jobTimersLock)
             {
                 if (_jobTimers.ContainsKey(fun))
                 {
-                    timer.Dispose();
+                    state.Timer.Dispose();
                     return;
                 }
-                _jobTimers[fun] = timer;
+                _jobTimers[fun] = state;
             }
 
             PassValue.AddRunningJob(fun);
-            timer.Enabled = true;
+            state.Timer.Enabled = true;
             WiterLog("System", "开始运行" + KindName(kind) + "：" + nameCN + "(" + fun + ")");
         }
 
         //停止一个任务的子定时器并清理其运行状态
         private void StopJob(string fun, bool log)
         {
-            System.Timers.Timer timer = null;
+            JobState state = null;
             lock (_jobTimersLock)
             {
-                if (_jobTimers.TryGetValue(fun, out timer))
+                if (_jobTimers.TryGetValue(fun, out state))
                 {
                     _jobTimers.Remove(fun);
                 }
@@ -263,15 +280,16 @@ namespace TimerProjectByWindowsService
 
             PassValue.RemoveRunningJob(fun);
 
-            if (timer != null)
+            if (state != null && state.Timer != null)
             {
-                timer.Enabled = false;
-                timer.Dispose();
+                state.Timer.Enabled = false;
+                state.Timer.Dispose();
             }
 
             PassValue.RemoveLastRunTime(fun);
             PassValue.UnmarkExecutedToday(fun);
-            PassValue.UnlockJob(fun);
+            //不再在这里解锁:如果任务仍在执行中,提前解锁会导致两次执行并发运行;
+            //执行器的finally保证解锁,OnStop末尾的UnlockAllJobs是兜底
 
             if (log)
             {
@@ -317,8 +335,14 @@ namespace TimerProjectByWindowsService
         #region Job调度（三种任务类型共用）
 
         //每个job子定时器的调度入口:读取Setup.xml,判断是否到了执行时间
-        private void JobTimer_Elapsed(string fun, JobKind kind)
+        private void JobTimer_Elapsed(string fun, JobKind kind, JobState state)
         {
+            //上一轮调度(含同步发邮件)还没跑完时跳过本tick,防止线程池堆积
+            if (Interlocked.CompareExchange(ref state.TickRunning, 1, 0) != 0)
+            {
+                return;
+            }
+
             try
             {
                 //任务已被主循环移除,自行停止
@@ -388,6 +412,10 @@ namespace TimerProjectByWindowsService
                 TryWriteEventLog(fun + " 调度出现问题：" + ex.Message);
                 WiterLog(fun, "调度出现问题：" + ex);
                 SendActionEmail(null, fun, fun + "-Time", ex.Message, ex.ToString());
+            }
+            finally
+            {
+                Interlocked.Exchange(ref state.TickRunning, 0);
             }
         }
 
@@ -507,14 +535,14 @@ namespace TimerProjectByWindowsService
                 string apiUrl = GetField(dt, "ApiUrl");
                 if (string.IsNullOrWhiteSpace(apiUrl))
                 {
-                    ConfigAlert(dt, fun, fun + "-ApiInfo", fun + "_Setup.xml中ApiUrl配置错误,无法执行。请按照说明调整(Api 请求地址)。");
+                    ConfigAlertFail(dt, fun, fun + "-ApiInfo", info, sw, fun + "_Setup.xml中ApiUrl配置错误,无法执行。请按照说明调整(Api 请求地址)。");
                     return;
                 }
 
                 string url;
                 if (!TryBuildSignedUrl(dt, apiUrl, out url))
                 {
-                    ConfigAlert(dt, fun, fun + "-ApiInfo", fun + "_Setup.xml中AuthenticationKey配置错误,无法执行。请按照说明调整(请求安全验证之密钥)。");
+                    ConfigAlertFail(dt, fun, fun + "-ApiInfo", info, sw, fun + "_Setup.xml中AuthenticationKey配置错误,无法执行。请按照说明调整(请求安全验证之密钥)。");
                     return;
                 }
 
@@ -562,7 +590,7 @@ namespace TimerProjectByWindowsService
                 DataTable sequenceDT = localFile.GetXmlInfo(configPath, fun + "_Sequence.xml");
                 if (sequenceDT == null || sequenceDT.Rows.Count == 0)
                 {
-                    ConfigAlert(dt, fun, fun + "-APISequence", fun + "_Sequence.xml不存在或没有配置步骤,无法执行。");
+                    ConfigAlertFail(dt, fun, fun + "-APISequence", info, sw, fun + "_Sequence.xml不存在或没有配置步骤,无法执行。");
                     return;
                 }
 
@@ -585,7 +613,7 @@ namespace TimerProjectByWindowsService
                         string connStr = GetField(dt, "ConnStr");
                         if (string.IsNullOrWhiteSpace(connStr))
                         {
-                            ConfigAlert(dt, fun, fun + "-APISequence", "第" + (i + 1) + "步为存储过程,但" + fun + "_Setup.xml中ConnStr为空,无法执行。请按照说明调整(数据库链接字符串)。");
+                            ConfigAlertFail(dt, fun, fun + "-APISequence", info, sw, "第" + (i + 1) + "步为存储过程,但" + fun + "_Setup.xml中ConnStr为空,无法执行。请按照说明调整(数据库链接字符串)。");
                             return;
                         }
 
@@ -597,14 +625,14 @@ namespace TimerProjectByWindowsService
                     {
                         if (string.IsNullOrWhiteSpace(stepInfo))
                         {
-                            ConfigAlert(dt, fun, fun + "-APISequence", "第" + (i + 1) + "步API地址为空,无法执行。请调整" + fun + "_Sequence.xml。");
+                            ConfigAlertFail(dt, fun, fun + "-APISequence", info, sw, "第" + (i + 1) + "步API地址为空,无法执行。请调整" + fun + "_Sequence.xml。");
                             return;
                         }
 
                         string url;
                         if (!TryBuildSignedUrl(dt, stepInfo, out url))
                         {
-                            ConfigAlert(dt, fun, fun + "-APISequence", "第" + (i + 1) + "步启用了安全验证,但" + fun + "_Setup.xml中AuthenticationKey为空,无法执行。");
+                            ConfigAlertFail(dt, fun, fun + "-APISequence", info, sw, "第" + (i + 1) + "步启用了安全验证,但" + fun + "_Setup.xml中AuthenticationKey为空,无法执行。");
                             return;
                         }
 
@@ -612,7 +640,7 @@ namespace TimerProjectByWindowsService
                     }
                     else
                     {
-                        ConfigAlert(dt, fun, fun + "-APISequence", "第" + (i + 1) + "步类型[" + stepType + "]不支持(仅支持:API地址/存储过程),顺序执行已中断。");
+                        ConfigAlertFail(dt, fun, fun + "-APISequence", info, sw, "第" + (i + 1) + "步类型[" + stepType + "]不支持(仅支持:API地址/存储过程),顺序执行已中断。");
                         return;
                     }
 
@@ -655,14 +683,14 @@ namespace TimerProjectByWindowsService
                 string connStr = GetField(dt, "ConnStr");
                 if (string.IsNullOrWhiteSpace(connStr))
                 {
-                    ConfigAlert(dt, fun, fun + "-SP", fun + "_Setup.xml中ConnStr配置错误,无法执行。请按照说明调整(数据库链接字符串)。");
+                    ConfigAlertFail(dt, fun, fun + "-SP", info, sw, fun + "_Setup.xml中ConnStr配置错误,无法执行。请按照说明调整(数据库链接字符串)。");
                     return;
                 }
 
                 string spName = GetField(dt, "StoredProcedure");
                 if (string.IsNullOrWhiteSpace(spName))
                 {
-                    ConfigAlert(dt, fun, fun + "-SP", fun + "_Setup.xml中StoredProcedure未配置,无法执行。请填写存储过程名称。");
+                    ConfigAlertFail(dt, fun, fun + "-SP", info, sw, fun + "_Setup.xml中StoredProcedure未配置,无法执行。请填写存储过程名称。");
                     return;
                 }
 
@@ -762,6 +790,13 @@ namespace TimerProjectByWindowsService
             SendActionEmail(dt, fun, funDetails, "配置错误", message);
         }
 
+        /// <summary>执行器路径的配置错误:在ConfigAlert基础上补写执行历史(调度层不调用此方法,避免每秒触发刷爆CSV)</summary>
+        private void ConfigAlertFail(DataTable dt, string fun, string funDetails, string info, Stopwatch sw, string message)
+        {
+            ConfigAlert(dt, fun, funDetails, message);
+            JobHistory.Record(fun, info, sw.Elapsed.TotalSeconds, "失败", message);
+        }
+
         private static bool TryParseDateTime(string value, out DateTime result)
         {
             return DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out result);
@@ -799,40 +834,10 @@ namespace TimerProjectByWindowsService
 
         #region 写入日志
 
-        private static readonly object LogLock = new object();
-
-        /// <summary>写入日志(线程池异步写,避免阻塞主流程)</summary>
+        /// <summary>写入日志:委托给专用写入器(有界队列+单线程写+节流+轮转+关机排空)</summary>
         public void WiterLog(string Fun, string Info)
         {
-            try
-            {
-                string fileName = DateTime.Now.ToString("yyyyMMdd") + ".log";
-                string basePath = localFile.LocalLog();
-                string logPath = Path.Combine(Path.Combine(basePath, Fun), DateTime.Now.ToString("yyyyMM"));
-                Directory.CreateDirectory(logPath);
-                string filePath = Path.Combine(logPath, fileName);
-
-                string log = "[" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "]       " + Info + "\r\n";
-                ThreadPool.QueueUserWorkItem(_ =>
-                {
-                    lock (LogLock)
-                    {
-                        try
-                        {
-                            System.IO.File.AppendAllText(filePath, log);
-                        }
-                        catch
-                        {
-                            //单次写入失败忽略,避免影响主流程
-                        }
-                    }
-                });
-            }
-            catch (Exception ex)
-            {
-                //日志失败不再递归写日志/发邮件,只尝试写事件查看器
-                TryWriteEventLog("WiterLog_" + Fun + " 出现问题：" + ex.Message);
-            }
+            LogWriter.Enqueue(Fun, Info);
         }
 
         private void TryWriteEventLog(string message)

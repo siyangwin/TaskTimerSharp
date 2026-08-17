@@ -65,7 +65,7 @@ TaskTimer 是一个基于 Windows 服务的定时任务调度系统，支持按�
     <ConnStr></ConnStr>                     <!-- 数据库连接字符串（顺序执行含存储过程步骤、或Type=2时必填） -->
     <Verification>False</Verification>      <!-- 是否启用 API 密钥验证 -->
     <AuthenticationKey></AuthenticationKey><!-- 安全验证密钥 -->
-    <RetryCount>0</RetryCount>              <!-- 可选，失败重试次数，默认0不重试，最大10 -->
+    <RetryCount>0</RetryCount>              <!-- 可选，失败重试次数，默认0不重试，最大10。注意：存储过程超时后重试可能导致重复执行，请确保存储过程可重入或幂等 -->
     <RetryInterval>60</RetryInterval>       <!-- 可选，重试间隔秒数，默认60 -->
     <HttpTimeout>600</HttpTimeout>          <!-- 可选，HTTP请求超时秒数，默认600 -->
   </TimeProjectJob>
@@ -118,13 +118,24 @@ TaskTimer 是一个基于 Windows 服务的定时任务调度系统，支持按�
     <add key="SendTo" value="bbbb@163.com"/>
     <!--Info通知,是否加入SendTo配置地址一起发送 true:发送 false:不发送-->
     <add key="InfoMessage" value="true"/>
+    <!--可选：日志队列容量(默认20000)、节流窗口分钟(默认30)、单文件上限MB(默认50)-->
+    <!--
+    <add key="LogQueueSize" value="20000"/>
+    <add key="LogThrottleMinutes" value="30"/>
+    <add key="LogMaxMB" value="50"/>
+    -->
   </appSettings>
 </configuration>
 ```
 
 ### 运行日志与执行历史
 - 运行日志：`安装目录\Log\任务名\yyyyMM\yyyyMMdd.log`
-- 执行历史：`安装目录\Log\History\任务名\yyyyMM.csv`，每次执行记录：时间、触发方式、耗时、状态（成功/失败）、结果摘要。服务重启后，周期任务会读取当天历史，避免同一天重复执行。
+  - 由专用写入线程异步写入（有界队列，不阻塞调度线程），关机时自动排空，保证最后一条日志落盘
+  - 重复消息自动节流（同任务同消息 30 分钟内只写一条，窗口过后补写被省略的次数）
+  - 单文件超过 50MB 自动轮转（保留最近一个旧文件）
+  - 写入失败（磁盘满/权限不足等）自动写入 Windows 事件查看器，不再静默丢失
+  - 可选 appSettings 配置项（缺省值即可直接使用）：`LogQueueSize`（队列容量，默认 20000）、`LogThrottleMinutes`（节流窗口，默认 30 分钟）、`LogMaxMB`（单文件上限，默认 50MB）
+- 执行历史：`安装目录\Log\History\任务名\yyyyMM.csv`，每次执行记录：时间、触发方式、耗时、状态（成功/失败）、结果摘要。服务重启后，周期任务会读取当天历史，避免同一天重复执行。配置错误导致的执行失败也会写入历史。
 
 ### 配置管理工具（TimerProjectConfigTool）
 <img width="1100" height="720" alt="image" src="https://github.com/user-attachments/assets/b7a00ac9-27e7-429d-8d40-735d903970d4" />
@@ -133,7 +144,7 @@ TaskTimer 是一个基于 Windows 服务的定时任务调度系统，支持按�
 **部署方式**：把编译产物 `TimerProjectConfigTool.exe` 和 `Languages` 文件夹拷贝到服务安装根目录（与 TimerProjectByWindowsService.exe 同级），双击运行即可。工具默认以自身所在目录为根目录，也可在界面上切换，切换后会记住该目录，下次启动自动沿用。
 
 **功能**：
-- 任务管理：新建/编辑/启用/停用任务（不提供删除，只能停用），自动创建任务文件夹与 XML 配置；保存后服务每秒自动加载，无需重启
+- 任务管理：新建/编辑/启用/停用任务（不提供删除，只能停用），自动创建任务文件夹与 XML 配置；保存后服务每秒自动加载，无需重启。**新建任务默认停用**，请在列表中手动点[启用]
 - 一致性检查：任务列表会标出"已注册，缺任务文件夹"/"有任务文件夹，未注册"等异常（鼠标悬浮有说明），打开编辑并保存一次即可自动修复
 - 编辑表单按选项联动显隐字段，提供 [测试连接]（验证数据库连接串）
 - 日志浏览：树状列出运行日志（含 System 服务级日志）与执行历史，单击预览、双击用系统默认程序打开

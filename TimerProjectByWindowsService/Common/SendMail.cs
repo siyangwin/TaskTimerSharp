@@ -82,6 +82,7 @@ namespace TimerProjectByWindowsService.Common
                     smtpClient.UseDefaultCredentials = false;
                     smtpClient.Credentials = new System.Net.NetworkCredential(MailAddress, MailPassWord);
                     smtpClient.DeliveryMethod = SmtpDeliveryMethod.Network;
+                    smtpClient.Timeout = 30 * 1000; //限制SMTP挂起时间,避免同步发邮件阻塞调度线程
                     mailMessage.BodyEncoding = Encoding.UTF8;
                     mailMessage.IsBodyHtml = true;//是否为html格式 
                     mailMessage.Priority = mailPriority;//发送邮件的优先等级 

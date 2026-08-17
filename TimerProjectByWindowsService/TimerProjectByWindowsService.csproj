@@ -67,6 +67,7 @@
     <Compile Include="Common\HttpRequest.cs" />
     <Compile Include="Common\JobHistory.cs" />
     <Compile Include="Common\LocalFile.cs" />
+    <Compile Include="Common\LogWriter.cs" />
     <Compile Include="Common\MailThrottle.cs" />
     <Compile Include="Common\PassValue.cs" />
     <Compile Include="Common\SendMail.cs" />

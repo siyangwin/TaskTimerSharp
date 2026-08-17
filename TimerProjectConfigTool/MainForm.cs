@@ -300,7 +300,7 @@ namespace TimerProjectConfigTool
                 {
                     RefreshJobs();
                     SelectJobByName(f.CreatedNameEN);
-                    SetStatus(Lang.Get("main.savedNoRestart"));
+                    SetStatus(Lang.Get("main.createdDisabled"));
                     EditSelectedJob();
                 }
             }

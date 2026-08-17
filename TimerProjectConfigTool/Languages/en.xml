@@ -51,6 +51,7 @@
   <String key="main.detectSummaryWithConfig">Loaded: {0} job(s) under Config, service config file detected</String>
   <String key="main.detectSummaryNoConfig">Loaded: {0} job(s) under Config, exe.config not detected (mail settings unavailable)</String>
   <String key="main.selectJobFirst">Please select a job first</String>
+  <String key="main.createdDisabled">Job created (disabled by default). Please complete the configuration, then click [Enable] in the list.</String>
   <String key="main.openFolderFailed">Cannot open folder: {0}</String>
   <String key="main.loadConfigFailed">Failed to load config: {0}</String>
   <String key="main.saveFailed">Save failed: {0}</String>
@@ -101,7 +102,7 @@
   <String key="newjob.typeApi">Call API (0)</String>
   <String key="newjob.typeSequence">Sequence (1)</String>
   <String key="newjob.typeSp">Stored procedure (2)</String>
-  <String key="newjob.status">Enabled after creation</String>
+  <String key="newjob.status">Enable after creation (recommended: keep unchecked until configured)</String>
   <String key="newjob.btnCreate">Create</String>
   <String key="newjob.nameCNRequired">Chinese name is required</String>
   <String key="newjob.nameENRequired">English name is required</String>
@@ -141,6 +142,7 @@
   <String key="jobedit.verification">Enable API key verification</String>
   <String key="jobedit.authKey">Authentication key:</String>
   <String key="jobedit.retryCount">Retry count (0-10):</String>
+  <String key="jobedit.retrySpWarning">Retrying a stored procedure after timeout may cause duplicate execution. Ensure the SP is re-entrant or idempotent.</String>
   <String key="jobedit.retryInterval">Retry interval (s):</String>
   <String key="jobedit.httpTimeout">HTTP timeout (s):</String>
   <String key="jobedit.remark">Remark:</String>

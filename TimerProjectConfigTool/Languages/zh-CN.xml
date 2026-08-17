@@ -51,6 +51,7 @@
   <String key="main.detectSummaryWithConfig">已加载：Config 下有 {0} 个任务，检测到服务配置文件</String>
   <String key="main.detectSummaryNoConfig">已加载：Config 下有 {0} 个任务，未检测到 exe.config（邮件设置页不可用）</String>
   <String key="main.selectJobFirst">请先选择一个任务</String>
+  <String key="main.createdDisabled">任务已创建（默认停用），请完善配置后在列表点[启用]</String>
   <String key="main.openFolderFailed">无法打开文件夹：{0}</String>
   <String key="main.loadConfigFailed">读取配置失败：{0}</String>
   <String key="main.saveFailed">保存失败：{0}</String>
@@ -101,7 +102,7 @@
   <String key="newjob.typeApi">调用API (0)</String>
   <String key="newjob.typeSequence">顺序执行 (1)</String>
   <String key="newjob.typeSp">存储过程 (2)</String>
-  <String key="newjob.status">创建后启用</String>
+  <String key="newjob.status">创建后立即启用（建议配置完成后再勾选）</String>
   <String key="newjob.btnCreate">创建</String>
   <String key="newjob.nameCNRequired">中文名不能为空</String>
   <String key="newjob.nameENRequired">英文名不能为空</String>
@@ -141,6 +142,7 @@
   <String key="jobedit.verification">启用API密钥验证</String>
   <String key="jobedit.authKey">安全验证密钥：</String>
   <String key="jobedit.retryCount">失败重试次数 (0-10)：</String>
+  <String key="jobedit.retrySpWarning">存储过程超时后重试可能导致重复执行，请确保存储过程可重入或幂等</String>
   <String key="jobedit.retryInterval">重试间隔（秒）：</String>
   <String key="jobedit.httpTimeout">HTTP超时（秒）：</String>
   <String key="jobedit.remark">备注：</String>

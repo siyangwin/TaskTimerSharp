@@ -63,7 +63,7 @@ namespace TimerProjectConfigTool
             typePanel.Controls.Add(_rdoType1);
             typePanel.Controls.Add(_rdoType2);
 
-            _chkEnabled = new CheckBox { AutoSize = true, Checked = true, Margin = new Padding(3, 10, 3, 3) };
+            _chkEnabled = new CheckBox { AutoSize = true, Checked = false, Margin = new Padding(3, 10, 3, 3) };
 
             _btnOk = new Button { AutoSize = true, Margin = new Padding(3, 14, 8, 3) };
             _btnOk.Click += BtnOk_Click;

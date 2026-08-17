@@ -138,10 +138,13 @@ namespace TimerProjectConfigTool
         private Button _btnSave;
         private Button _btnCancel;
 
+        private ToolTip _toolTip;
+
         public JobEditForm(string rootDir, string nameEN)
         {
             _rootDir = rootDir;
             _nameEN = nameEN;
+            _toolTip = new ToolTip();
             BuildUi();
             LoadData();
             ApplyLanguage();
@@ -829,6 +832,7 @@ namespace TimerProjectConfigTool
             _chkVerification.Text = Lang.Get("jobedit.verification");
             _lblAuthKey.Text = Lang.Get("jobedit.authKey");
             _lblRetryCount.Text = Lang.Get("jobedit.retryCount");
+            _toolTip.SetToolTip(_lblRetryCount, Lang.Get("jobedit.retrySpWarning"));
             _lblRetryInterval.Text = Lang.Get("jobedit.retryInterval");
             _lblHttpTimeout.Text = Lang.Get("jobedit.httpTimeout");
             _lblRemark.Text = Lang.Get("jobedit.remark");
